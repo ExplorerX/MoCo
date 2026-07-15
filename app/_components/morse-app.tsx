@@ -96,6 +96,12 @@ function isEditableTarget(target: EventTarget | null) {
   return Boolean(element?.closest("input, textarea, select, [contenteditable='true']"));
 }
 
+function learnFilterForCharacter(character?: string): LearnFilter {
+  if (character && /^\d$/.test(character)) return "numbers";
+  if (character && !/^[A-Z]$/.test(character)) return "punctuation";
+  return "letters";
+}
+
 export default function MorseApp({ initialPath }: { initialPath: string }) {
   const [route, setRoute] = useState<AppRoute>(() => routeFromPath(initialPath));
   const view = route.view;
@@ -124,7 +130,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const [shuffleQuestions, setShuffleQuestions] = useState(true);
   const [timeoutMs, setTimeoutMs] = useState<number | null>(null);
   const [practiceError, setPracticeError] = useState("");
-  const [learnFilter, setLearnFilter] = useState<LearnFilter>("letters");
+  const [learnFilter, setLearnFilter] = useState<LearnFilter>(() => learnFilterForCharacter(route.character));
+  const [learnCode, setLearnCode] = useState("");
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [sessionCode, setSessionCode] = useState("");
   const [typedAnswer, setTypedAnswer] = useState("");
@@ -144,7 +151,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trainingStateRef = useRef<TrainingState | null>(null);
   const routeRef = useRef<AppRoute>(route);
-  const activeInputTargetRef = useRef<"keyer" | "session">("keyer");
+  const activeInputTargetRef = useRef<"keyer" | "session" | "learn">("keyer");
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const sessionActionsRef = useRef({ pause: () => undefined, replay: () => undefined, submit: () => undefined, timeout: () => undefined });
 
@@ -184,8 +191,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         void repositoryRef.current?.saveSession(interrupted.snapshot);
       }
       setSessionCode("");
+      setLearnCode("");
       setTypedAnswer("");
-      setRoute(routeFromPath(window.location.pathname));
+      const nextRoute = routeFromPath(window.location.pathname);
+      if (nextRoute.view === "learn") setLearnFilter(learnFilterForCharacter(nextRoute.character));
+      setRoute(nextRoute);
     };
     window.addEventListener("popstate", onPopState);
     queueMicrotask(() => {
@@ -303,7 +313,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     setSessionCode((value) => `${value}${symbol}`.slice(0, 6));
   }, []);
 
-  const startLiveTone = useCallback(async (source: "keyboard" | "pointer", target: "keyer" | "session" = "keyer") => {
+  const appendLearnSymbol = useCallback((symbol: "." | "-") => {
+    setLearnCode((value) => `${value}${symbol}`.slice(0, 6));
+  }, []);
+
+  const startLiveTone = useCallback(async (source: "keyboard" | "pointer", target: "keyer" | "session" | "learn" = "keyer") => {
     const input = getInputEngine();
     const signal = source === "keyboard"
       ? keyboardSignal("single", "down", performance.now())
@@ -334,14 +348,15 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     setIsPressing(false);
     if (interpretation.kind !== "symbol") return;
     if (activeInputTargetRef.current === "session") appendSessionSymbol(interpretation.symbol);
+    else if (activeInputTargetRef.current === "learn") appendLearnSymbol(interpretation.symbol);
     else appendSymbol(interpretation.symbol);
     setSamples((value) => [
       { duration: Math.round(interpretation.durationMs), symbol: interpretation.symbol, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) },
       ...value,
     ].slice(0, 8));
-  }, [appendSessionSymbol, appendSymbol, getInputEngine]);
+  }, [appendLearnSymbol, appendSessionSymbol, appendSymbol, getInputEngine]);
 
-  const tapSymbol = useCallback(async (symbol: "." | "-", source: "keyboard" | "pointer", target: "keyer" | "session" = "keyer") => {
+  const tapSymbol = useCallback(async (symbol: "." | "-", source: "keyboard" | "pointer", target: "keyer" | "session" | "learn" = "keyer") => {
     const input = getInputEngine();
     const control = symbol === "." ? "dot" : "dash";
     const signal = source === "keyboard"
@@ -352,18 +367,20 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     const audio = await ensureAudio();
     if (audio) void audio.playTone(interpretation.durationMs);
     if (target === "session") appendSessionSymbol(interpretation.symbol);
+    else if (target === "learn") appendLearnSymbol(interpretation.symbol);
     else appendSymbol(interpretation.symbol);
     setSamples((value) => [
       { duration: Math.round(interpretation.durationMs), symbol: interpretation.symbol, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) },
       ...value,
     ].slice(0, 8));
-  }, [appendSessionSymbol, appendSymbol, ensureAudio, getInputEngine]);
+  }, [appendLearnSymbol, appendSessionSymbol, appendSymbol, ensureAudio, getInputEngine]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const sessionKeying = view === "session" && sessionMode === "character-to-keying";
-      if ((view !== "keyer" && !sessionKeying) || isEditableTarget(event.target) || event.repeat) return;
-      const target = sessionKeying ? "session" : "keyer";
+      const learningKeyer = view === "learn";
+      if ((view !== "keyer" && !sessionKeying && !learningKeyer) || isEditableTarget(event.target) || event.repeat) return;
+      const target = sessionKeying ? "session" : learningKeyer ? "learn" : "keyer";
       if (keyMode === "single" && event.code === bindings.single) {
         event.preventDefault();
         void startLiveTone("keyboard", target);
@@ -380,10 +397,15 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         event.preventDefault();
         setSequence((value) => value.slice(0, -1));
       }
+      if (learningKeyer && event.code === bindings.delete) {
+        event.preventDefault();
+        setLearnCode((value) => value.slice(0, -1));
+      }
     };
     const onKeyUp = (event: KeyboardEvent) => {
       const sessionKeying = view === "session" && sessionMode === "character-to-keying";
-      if ((view === "keyer" || sessionKeying) && keyMode === "single" && event.code === bindings.single) {
+      const learningKeyer = view === "learn";
+      if ((view === "keyer" || sessionKeying || learningKeyer) && keyMode === "single" && event.code === bindings.single) {
         event.preventDefault();
         stopLiveTone("keyboard");
       }
@@ -823,6 +845,13 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     [aggregatedCharacterStats],
   );
   const activeCharacterStat = aggregatedCharacterStats.find((stat) => stat.character === activeCharacter) ?? null;
+  const learnInputState = learnCode === ""
+    ? { label: "等待输入", tone: "idle" }
+    : learnCode === MORSE[activeCharacter]
+      ? { label: "输入正确", tone: "success" }
+      : MORSE[activeCharacter].startsWith(learnCode)
+        ? { label: "继续输入", tone: "progress" }
+        : { label: "与目标不匹配", tone: "error" };
 
   const pageTitle: Record<AppView, string> = {
     onboarding: "欢迎来到 Morse Lab",
@@ -876,7 +905,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
           <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("settings")}>
             <span>06</span>设置
           </button>
-          <p>STAGE C.1 · 0.3.1</p>
+          <p>STAGE C.1 · 0.3.2</p>
         </div>
       </aside>}
 
@@ -964,13 +993,13 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
             <section className="card character-browser">
               <div className="section-heading compact"><div><p className="section-label">REFERENCE</p><h2>国际 Morse 字符</h2></div><span className="count">{characterGroups.length} / {Object.keys(MORSE).length}</span></div>
               <div className="filter-row" aria-label="字符分类">
-                <button className={learnFilter === "letters" ? "chip active" : "chip"} aria-pressed={learnFilter === "letters"} onClick={() => setLearnFilter("letters")}>字母</button>
-                <button className={learnFilter === "numbers" ? "chip active" : "chip"} aria-pressed={learnFilter === "numbers"} onClick={() => setLearnFilter("numbers")}>数字</button>
-                <button className={learnFilter === "punctuation" ? "chip active" : "chip"} aria-pressed={learnFilter === "punctuation"} onClick={() => setLearnFilter("punctuation")}>标点</button>
+                <button className={learnFilter === "letters" ? "chip active" : "chip"} aria-pressed={learnFilter === "letters"} onClick={() => { setLearnFilter("letters"); setLearnCode(""); goTo("/learn/character/K"); }}>字母</button>
+                <button className={learnFilter === "numbers" ? "chip active" : "chip"} aria-pressed={learnFilter === "numbers"} onClick={() => { setLearnFilter("numbers"); setLearnCode(""); goTo("/learn/character/0"); }}>数字</button>
+                <button className={learnFilter === "punctuation" ? "chip active" : "chip"} aria-pressed={learnFilter === "punctuation"} onClick={() => { setLearnFilter("punctuation"); setLearnCode(""); goTo("/learn/character/."); }}>标点</button>
               </div>
               <div className="character-grid">
                 {characterGroups.map((character) => (
-                  <button key={character} className={activeCharacter === character ? "character active" : "character"} onClick={() => goTo(`/learn/character/${encodeURIComponent(character)}`)}>
+                  <button key={character} className={activeCharacter === character ? "character active" : "character"} onClick={() => { stopPlayback(); setLearnCode(""); goTo(`/learn/character/${encodeURIComponent(character)}`); }}>
                     <strong>{character}</strong><span>{formatCode(MORSE[character])}</span>
                   </button>
                 ))}
@@ -985,6 +1014,36 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               </div>
               <button className="primary full" onClick={() => void playText(activeCharacter)}>{isPlaying ? "播放中…" : "播放字符"}</button>
               <button className="secondary full" onClick={() => void startSession("sound", [activeCharacter])}>只练这个字符</button>
+              <section className="learn-keyer" aria-labelledby="learn-keyer-title">
+                <div className="learn-keyer-heading">
+                  <span id="learn-keyer-title">按键练习</span>
+                  <strong className={learnInputState.tone} aria-live="polite">{learnInputState.label}</strong>
+                </div>
+                <div className={`learn-code-input ${learnInputState.tone}`} aria-label={`当前输入：${learnCode ? formatCode(learnCode) : "空"}`}>
+                  {learnCode ? formatCode(learnCode) : "等待输入…"}
+                </div>
+                {keyMode === "single" ? (
+                  <button
+                    className={isPressing ? "key-pad learn-pad pressing" : "key-pad learn-pad"}
+                    onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); void startLiveTone("pointer", "learn"); }}
+                    onPointerUp={() => stopLiveTone("pointer")}
+                    onPointerCancel={() => stopLiveTone("pointer", true)}
+                    onContextMenu={(event) => event.preventDefault()}
+                  >
+                    <span>{isPressing ? "正在发声" : "按住发报"}</span>
+                    <small>{bindings.single} · 短按点，长按划</small>
+                  </button>
+                ) : (
+                  <div className="dual-pads learn-pads">
+                    <button className="key-pad learn-pad" onClick={() => void tapSymbol(".", "pointer", "learn")}><span>点 ·</span><small>{bindings.dot}</small></button>
+                    <button className="key-pad learn-pad" onClick={() => void tapSymbol("-", "pointer", "learn")}><span>划 —</span><small>{bindings.dash}</small></button>
+                  </div>
+                )}
+                <div className="learn-keyer-actions">
+                  <button className="text-button" onClick={() => setLearnCode((value) => value.slice(0, -1))} disabled={!learnCode}>退格</button>
+                  <button className="text-button" onClick={() => setLearnCode("")} disabled={!learnCode}>清空</button>
+                </div>
+              </section>
               <div className="detail-note"><span>字符速度</span><strong>{wpm} WPM</strong></div>
               <div className="detail-note"><span>近期表现</span><strong>{activeCharacterStat ? `${Math.round(activeCharacterStat.correct / activeCharacterStat.attempts * 100)}% · ${activeCharacterStat.attempts} 次` : "暂无记录"}</strong></div>
             </aside>
@@ -1146,7 +1205,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               {settingsSection === "input" && <><div className="segmented"><button className={keyMode === "single" ? "active" : ""} onClick={() => setKeyMode("single")}>单键时长</button><button className={keyMode === "dual" ? "active" : ""} onClick={() => setKeyMode("dual")}>点划双键</button></div><div className="binding-grid">{([['single','单键'],['dot','点'],['dash','划'],['submit','提交'],['delete','删除'],['replay','重播'],['pause','暂停']] as [keyof KeyBindings, string][]).map(([control, label]) => <label key={control}><span>{label}</span><input readOnly value={bindings[control]} onKeyDown={(event) => { event.preventDefault(); setBindings((value) => ({ ...value, [control]: event.code })); }} aria-label={`${label}按键，聚焦后按下新键`} /></label>)}</div>{new Set(Object.values(bindings)).size !== Object.values(bindings).length && <p className="inline-error" role="alert">检测到重复键位，请为每项操作设置不同按键。</p>}<div className="button-row"><button className="secondary" onClick={() => setBindings(DEFAULT_BINDINGS)}>恢复默认</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyF", dash: "KeyD" })}>左手预设</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyJ", dash: "KeyK" })}>右手预设</button><button className="text-button" onClick={() => navigate("keyer")}>前往按键实验室</button></div></>}
               {settingsSection === "training" && <><label className="setting-range"><span>默认题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label><label className="setting-range"><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => { const next = Number(event.target.value); setWpm(next); setEffectiveWpm((value) => Math.min(value, next)); }} /></label><label className="setting-range"><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label><label className="setting-text"><span>默认字符组</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} /></label><label className="setting-text"><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label></>}
               {settingsSection === "data" && <><div className="setting-row"><span><strong>本地训练数据库</strong><small>逐题写入 IndexedDB，可在刷新后恢复</small></span><b>{storageState === "ready" ? "READY" : storageState === "error" ? "ERROR" : "LOADING"}</b></div><div className="setting-row"><span><strong>已记录字符</strong><small>仅统计真实作答</small></span><b>{aggregatedCharacterStats.length}</b></div><input ref={importInputRef} className="visually-hidden" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLearningData(file); event.target.value = ""; }} /><div className="button-row data-actions"><button className="secondary" onClick={() => void exportLearningData()}>导出 JSON</button><button className="secondary" onClick={() => importInputRef.current?.click()}>导入数据</button><button className="primary danger-action" onClick={() => void clearLearningData()}>清空本机数据</button></div>{dataMessage && <p className="status-message" role="status">{dataMessage}</p>}</>}
-              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.1</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
+              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.2</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
             </section>
           </div>
         )}

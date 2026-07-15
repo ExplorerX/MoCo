@@ -131,6 +131,20 @@ button { color: inherit; }
 .timing-line .dot { width: 12px; }
 .timing-line .dash { width: 38px; }
 .character-detail .secondary { margin-top: 8px; }
+.learn-keyer { display: grid; gap: 9px; margin-top: 22px; padding: 16px 0 4px; border-top: 1px solid var(--line); text-align: left; }
+.learn-keyer-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+.learn-keyer-heading strong { color: var(--muted); font: 10px var(--font-mono); }
+.learn-keyer-heading strong.success { color: var(--success); }
+.learn-keyer-heading strong.error { color: var(--danger); }
+.learn-keyer-heading strong.progress { color: var(--accent); }
+.learn-code-input { min-height: 52px; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); font: 18px var(--font-mono); letter-spacing: .14em; text-align: center; }
+.learn-code-input.success { border-color: var(--success); color: var(--success); }
+.learn-code-input.error { border-color: var(--danger); color: var(--danger); }
+.learn-code-input.progress { border-color: var(--accent); color: var(--accent); }
+.key-pad.learn-pad { min-height: 88px; }
+.learn-pads { gap: 7px; }
+.learn-keyer-actions { display: flex; justify-content: flex-end; gap: 16px; }
+.learn-keyer-actions .text-button:disabled { opacity: .4; cursor: not-allowed; }
 .detail-note { display: flex; justify-content: space-between; gap: 12px; text-align: left; border-top: 1px solid var(--line); padding: 14px 0; margin-top: 20px; color: var(--muted); font-size: 12px; }
 .detail-note + .detail-note { margin-top: 0; }
 .detail-note strong { color: var(--text); }

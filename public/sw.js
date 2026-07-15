@@ -1,5 +1,5 @@
 // Bump this value for every released application shell so the waiting-worker update flow is triggered.
-const CACHE_VERSION = "morse-lab-v0.3.1";
+const CACHE_VERSION = "morse-lab-v0.3.2";
 const APP_SHELL = ["/", "/home", "/practice", "/keyer", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
