@@ -92,6 +92,8 @@ test("recovers the most recently updated incomplete session", async () => {
   await repository.createSession(newer.snapshot);
   const recovered = await repository.getLatestRecoverableSession();
   assert.equal(recovered?.snapshot.id, "newer-session");
+  const recent = await repository.getRecentSessions(1);
+  assert.deepEqual(recent.map((session) => session.id), ["newer-session"]);
   repository.close();
   await repository.database.delete();
 });

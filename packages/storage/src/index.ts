@@ -57,6 +57,8 @@ export interface SessionRepository {
   saveAttemptAndSession(attempt: Attempt, snapshot: SessionSnapshot): Promise<void>;
   loadSession(sessionId: string): Promise<StoredTrainingSession | null>;
   getLatestRecoverableSession(): Promise<StoredTrainingSession | null>;
+  getRecentSessions(limit?: number): Promise<SessionSnapshot[]>;
+  getCharacterStats(): Promise<CharacterStatRecord[]>;
 }
 
 export class LearningMorseDatabase extends Dexie {
@@ -159,6 +161,10 @@ export class DexieSessionRepository implements SessionRepository {
       .toArray();
     recoverable.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     return recoverable[0] ? this.loadSession(recoverable[0].id) : null;
+  }
+
+  async getRecentSessions(limit = 20): Promise<SessionSnapshot[]> {
+    return this.database.sessions.orderBy("updatedAt").reverse().limit(limit).toArray();
   }
 
   async getCharacterStats(): Promise<CharacterStatRecord[]> {
