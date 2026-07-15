@@ -26,9 +26,53 @@ export type ToneEvent = {
   durationMs: number;
 };
 
+export type MorseTiming = {
+  characterWpm: number;
+  effectiveWpm: number;
+  unitMs: number;
+  elementGapMs: number;
+  characterGapMs: number;
+  wordGapMs: number;
+  gapScale: number;
+};
+
+const PARIS_CHARACTER_UNITS = 31;
+const PARIS_SPACING_UNITS = 19;
+const PARIS_TOTAL_UNITS = PARIS_CHARACTER_UNITS + PARIS_SPACING_UNITS;
+
 export function dotUnitMs(wpm: number): number {
   if (!Number.isFinite(wpm) || wpm <= 0) throw new RangeError("WPM must be greater than zero");
   return 1200 / wpm;
+}
+
+export function farnsworthGapScale(characterWpm: number, effectiveWpm: number): number {
+  dotUnitMs(characterWpm);
+  dotUnitMs(effectiveWpm);
+  if (effectiveWpm > characterWpm) {
+    throw new RangeError("Effective WPM cannot exceed character WPM");
+  }
+
+  return (
+    PARIS_TOTAL_UNITS * (characterWpm / effectiveWpm) - PARIS_CHARACTER_UNITS
+  ) / PARIS_SPACING_UNITS;
+}
+
+export function createMorseTiming(
+  characterWpm: number,
+  effectiveWpm = characterWpm,
+): MorseTiming {
+  const unitMs = dotUnitMs(characterWpm);
+  const gapScale = farnsworthGapScale(characterWpm, effectiveWpm);
+
+  return {
+    characterWpm,
+    effectiveWpm,
+    unitMs,
+    elementGapMs: unitMs,
+    characterGapMs: unitMs * 3 * gapScale,
+    wordGapMs: unitMs * 7 * gapScale,
+    gapScale,
+  };
 }
 
 export function formatMorse(code: string): string {
@@ -67,26 +111,41 @@ export function classifyPress(durationMs: number, wpm: number, thresholdUnits = 
   return durationMs < dotUnitMs(wpm) * thresholdUnits ? "." : "-";
 }
 
-export function createStandardTimeline(text: string, wpm: number): ToneEvent[] {
-  const unit = dotUnitMs(wpm);
-  const words = text.trim().toUpperCase().split(/\s+/).filter(Boolean);
+export function createTimeline(text: string, timing: MorseTiming): ToneEvent[] {
+  const words = text
+    .trim()
+    .toUpperCase()
+    .split(/\s+/)
+    .map((word) => Array.from(word).filter((character): character is MorseCharacter => character in MORSE))
+    .filter((characters) => characters.length > 0);
   const events: ToneEvent[] = [];
   let cursorMs = 0;
 
-  words.forEach((word, wordIndex) => {
-    const characters = Array.from(word).filter((character): character is MorseCharacter => character in MORSE);
+  words.forEach((characters, wordIndex) => {
     characters.forEach((character, characterIndex) => {
       const symbols = MORSE[character].split("") as MorseSymbol[];
       symbols.forEach((symbol, symbolIndex) => {
-        const durationMs = symbol === "." ? unit : unit * 3;
+        const durationMs = symbol === "." ? timing.unitMs : timing.unitMs * 3;
         events.push({ character, symbol, startMs: cursorMs, durationMs });
         cursorMs += durationMs;
-        if (symbolIndex < symbols.length - 1) cursorMs += unit;
+        if (symbolIndex < symbols.length - 1) cursorMs += timing.elementGapMs;
       });
-      if (characterIndex < characters.length - 1) cursorMs += unit * 3;
+      if (characterIndex < characters.length - 1) cursorMs += timing.characterGapMs;
     });
-    if (wordIndex < words.length - 1) cursorMs += unit * 7;
+    if (wordIndex < words.length - 1) cursorMs += timing.wordGapMs;
   });
 
   return events;
+}
+
+export function createStandardTimeline(text: string, wpm: number): ToneEvent[] {
+  return createTimeline(text, createMorseTiming(wpm));
+}
+
+export function createFarnsworthTimeline(
+  text: string,
+  characterWpm: number,
+  effectiveWpm: number,
+): ToneEvent[] {
+  return createTimeline(text, createMorseTiming(characterWpm, effectiveWpm));
 }

@@ -6,11 +6,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | 0.1.0 |
+| 文档版本 | 0.2.0 |
 | 状态 | MVP 架构基线 |
 | 更新日期 | 2026-07-15 |
 | 适用范围 | Web/PWA 核心及 Android、iOS、桌面封装边界 |
-| 当前实现 | Vinext/React 交互原型，单页面内存状态 |
+| 当前实现 | npm workspace；Vinext/React 原型已使用独立 `morse-core` |
 | 目标实现 | React + TypeScript + Vite 的本地优先客户端应用 |
 
 ## 2. 架构驱动因素
@@ -41,7 +41,7 @@
 - 训练题目和统计为研究数据，不具备完整业务模型。
 - 尚无 IndexedDB 会话持久化、数据迁移和导入导出。
 - 尚无 PWA Manifest、Service Worker 和离线更新策略。
-- Effective WPM 目前只展示，尚未参与 Farnsworth 间隔计算。
+- 训练会话尚未提供速度配置界面；原型固定以 20/10 WPM 使用已验证的 Farnsworth 时间轴。
 - 主要逻辑仍集中在 `app/page.tsx`，需要按本文档拆分。
 
 原型只作为交互和风险验证参考；正式代码迁移时保留已验证行为，不保留其单文件耦合方式。
@@ -98,7 +98,7 @@ LearningMorseCode/
 
 ### 5.1 原型迁移策略
 
-1. 先将已验证的 `lib/morse-core.ts` 迁移到 `packages/morse-core`。
+1. 已将验证过的 Morse 规则迁移到 `packages/morse-core`，原型通过 workspace 包消费。
 2. 将音频、按键和会话逻辑分别提取为无 UI 的服务。
 3. 在 `apps/web` 重建稳定路由和页面壳，逐页迁移原型组件。
 4. 新 Web 客户端达到功能等价后，停止维护根目录研究原型。
@@ -159,6 +159,8 @@ type ToneEvent = {
 - 点单位使用 `1200 / Character WPM` 毫秒。
 - 划为 3 单位，元素间隔 1 单位，字符间隔 3 单位，单词间隔 7 单位。
 - Farnsworth 只扩展字符和单词间隔，不改变字符内部点划。
+- 以 PARIS 的 31 个字符内部单位和 19 个间隔单位为基准，间隔倍率为 `(50 × Character WPM / Effective WPM - 31) / 19`。
+- Effective WPM 必须大于 0 且不能高于 Character WPM；两者相等时倍率为 1。
 - 时间轴生成必须是确定性纯函数，相同输入和配置始终得到相同事件列表。
 
 ### 7.2 练习定义
@@ -168,7 +170,11 @@ type PracticeMode =
   | "character-to-code"
   | "code-to-character"
   | "sound-to-character"
-  | "character-to-keying";
+  | "character-to-keying"
+  | "text-to-code"
+  | "code-to-text"
+  | "sound-to-text"
+  | "free-keying";
 
 type PracticeDefinition = {
   schemaVersion: number;
@@ -481,10 +487,12 @@ MVP 仅记录本地、脱敏的技术诊断：
 
 ### 阶段 A：领域核心
 
-- 建立 workspaces 和 `packages/morse-core`。
-- 完成全部 MVP 字符、规范化、编解码和标准时间轴测试。
-- 实现 Farnsworth 时间轴和固定样本。
-- 定义稳定数据协议。
+**状态：已完成（2026-07-15）。**
+
+- [x] 建立 npm workspaces 和 `packages/morse-core`。
+- [x] 完成全部 MVP 字符、规范化、编解码和标准时间轴测试。
+- [x] 实现 Farnsworth 时间轴和固定样本。
+- [x] 建立 `packages/shared-types` 并定义练习、会话与作答协议。
 
 ### 阶段 B：引擎与持久化
 
@@ -514,7 +522,6 @@ MVP 仅记录本地、脱敏的技术诊断：
 
 ## 20. 待验证决策
 
-- Farnsworth 间隔计算的最终实现和边界样本。
 - MVP 明确支持的最低浏览器与操作系统版本。
 - IndexedDB 长期数据量和逐题记录保留策略。
 - Web Audio 在低端 Android、iOS Safari 和各应用 WebView 的实际延迟。
@@ -532,4 +539,3 @@ MVP 仅记录本地、脱敏的技术诊断：
 - [Playwright Documentation](https://playwright.dev/docs/intro)
 - [Capacitor Documentation](https://capacitorjs.com/docs)
 - [Tauri 2 Documentation](https://v2.tauri.app/)
-

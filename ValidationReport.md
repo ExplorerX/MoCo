@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 报告版本 | 0.1.0 |
+| 报告版本 | 0.2.0 |
 | 原型版本 | Prototype 0.1 |
 | 验证日期 | 2026-07-15 |
 | 状态 | 自动验证完成；真机验证待执行 |
@@ -25,6 +25,8 @@
 - 可视点划字符规范化检查。
 - 点单位和单键阈值检查。
 - SOS 标准时间轴及总时长检查。
+- 标准间隔倍率和 20/10 WPM Farnsworth 固定样本检查。
+- npm workspace 领域包及共享数据协议的类型检查。
 - 代码级练习流程和发报释放路径审查。
 
 ### 2.2 尚未执行
@@ -52,8 +54,12 @@
 | VR-A08 | 点单位 | 通过 | 20 WPM 对应 60 ms 点单位 |
 | VR-A09 | 单键阈值 | 通过 | 2 单位阈值下 119 ms 为点、120 ms 为划 |
 | VR-A10 | SOS 时间轴 | 通过 | 9 个音符起点和时长准确，总时长 1620 ms |
+| VR-A11 | 标准速度间隔 | 通过 | Character/Effective 均为 20 WPM 时倍率为 1 |
+| VR-A12 | Farnsworth 倍率 | 通过 | 20/10 WPM 的间隔倍率精确为 69/19 |
+| VR-A13 | PARIS 固定样本 | 通过 | 20/10 WPM 下含尾随词间隔总时长为 6000 ms |
+| VR-A14 | 速度边界 | 通过 | Effective WPM 高于 Character WPM 时拒绝配置 |
 
-自动测试合计 6 项测试用例，6 项通过，0 项失败。构建、类型和静态检查均通过。
+自动测试合计 9 项测试用例，9 项通过，0 项失败。构建、类型和静态检查均通过。
 
 ## 4. 流程结构检查
 
@@ -99,14 +105,14 @@
 | VR-F02 | 主题恢复在 effect 中同步设置状态 | 违反 React effect 规则并可能产生级联渲染 | 已修复：延后到动画帧恢复 |
 | VR-F03 | Effective WPM setter 未使用 | 无效状态 API 和静态告警 | 已修复：移除未使用 setter |
 | VR-F04 | 每个音符分别读取 `AudioContext.currentTime` | 长内容可能产生微小调度基准偏移 | 已修复：整段播放共享单一基准时刻 |
-| VR-F05 | Morse 规则内嵌于页面 | 无法独立测试和跨端复用 | 已部分修复：提取 `lib/morse-core.ts` 并增加测试 |
+| VR-F05 | Morse 规则内嵌于页面 | 无法独立测试和跨端复用 | 已修复：迁移至 `packages/morse-core`，原型经 workspace 包消费 |
 | VR-F06 | 脚手架 Worker 类型不完整 | 独立类型检查失败 | 已修复：声明最小资产接口并收紧检查边界 |
+| VR-F07 | Effective WPM 未参与播放 | 展示速度与真实听感不一致 | 已修复：实现 Farnsworth 时间轴并接入原型播放 |
 
 ## 6. 当前未解决问题
 
 | ID | 优先级 | 问题 | 进入正式开发前的处理 |
 | --- | --- | --- | --- |
-| VR-O01 | 阻塞 P0 | Effective WPM 尚未影响 Farnsworth 间隔 | 在 `morse-core` 实现并增加固定样本 |
 | VR-O02 | 阻塞 P0 | 会话、作答和统计没有 IndexedDB 持久化 | 建立 storage 和 TrainingEngine 后实现 |
 | VR-O03 | 阻塞 P0 | 没有 PWA Manifest、Service Worker 和离线更新 | 正式 Web 客户端阶段实现 |
 | VR-O04 | 阻塞 P0 | 页面只有内存视图，没有 IA 中定义的稳定路由 | 迁移到正式 React Router 页面 |
@@ -224,14 +230,13 @@
 - [ ] 至少一台 Windows/macOS 物理键盘设备完成任务三。
 - [ ] 至少一台 Android 触摸设备完成任务一和任务三。
 - [ ] 至少一台 iPhone/iPad 完成音频解锁和后台恢复。
-- [ ] 完成 Farnsworth 时间轴自动测试。
+- [x] 完成 Farnsworth 时间轴自动测试。
 - [ ] 没有未解决的粘连音或阻塞性点划误判。
 
 ## 10. 下一步
 
-1. 按 [Architecture.md](./Architecture.md) 阶段 A 建立正式领域包。
-2. 实现并测试 Farnsworth 时间轴。
-3. 建立 TrainingEngine 会话模型和 IndexedDB 存储骨架。
+1. 进入 [Architecture.md](./Architecture.md) 阶段 B，建立 TrainingEngine 状态机。
+2. 建立 IndexedDB schema、迁移与仓储接口，并实现逐题持久化。
+3. 提取 AudioEngine 和 InputEngine，使训练引擎不依赖 React。
 4. 由用户在现有私密原型上执行第 7 节真机测试，并回填记录。
 5. 根据真机结果决定 Web Audio 是否足够，不提前开发原生音频插件。
-

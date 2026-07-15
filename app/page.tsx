@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MORSE as MORSE_TABLE, REVERSE_MORSE, classifyPress, createStandardTimeline, dotUnitMs, formatMorse as formatCode } from "../lib/morse-core";
+import { MORSE as MORSE_TABLE, REVERSE_MORSE, classifyPress, createFarnsworthTimeline, dotUnitMs, formatMorse as formatCode } from "@learning-morse/morse-core";
 
 type View = "home" | "learn" | "practice" | "session" | "keyer" | "stats" | "settings";
 type Theme = "light" | "dark" | "amber" | "contrast";
@@ -123,7 +123,7 @@ export default function MorsePrototype() {
     if (!context) return;
 
     setIsPlaying(true);
-    const timeline = createStandardTimeline(text, wpm);
+    const timeline = createFarnsworthTimeline(text, wpm, effectiveWpm);
     const baseTime = context.currentTime + 0.03;
     timeline.forEach((event) => {
       scheduleOscillator(context, baseTime + event.startMs / 1000, event.durationMs, frequency, volume);
@@ -133,7 +133,7 @@ export default function MorsePrototype() {
 
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
     playbackTimerRef.current = setTimeout(() => setIsPlaying(false), cursorMs + 100);
-  }, [ensureAudio, frequency, isPlaying, volume, wpm]);
+  }, [effectiveWpm, ensureAudio, frequency, isPlaying, volume, wpm]);
 
   const clearCommitTimers = useCallback(() => {
     if (charTimerRef.current) clearTimeout(charTimerRef.current);
@@ -514,7 +514,7 @@ export default function MorsePrototype() {
               <p className="section-label">APPEARANCE</p><h2>主题与显示</h2><p>原型阶段用于验证主题令牌是否能覆盖所有核心训练状态。</p>
               <div className="theme-grid">{(["light", "dark", "amber", "contrast"] as Theme[]).map((item) => <button key={item} className={theme === item ? `theme-swatch ${item} active` : `theme-swatch ${item}`} onClick={() => setTheme(item)}><i /><span>{item === "light" ? "浅色" : item === "dark" ? "深色" : item === "amber" ? "无线电琥珀" : "高对比度"}</span></button>)}</div>
               <hr />
-              <p className="section-label">AUDIO DEFAULTS</p><div className="setting-row"><span><strong>默认音调</strong><small>练习和演示使用同一音频核心</small></span><b>{frequency} Hz</b></div><div className="setting-row"><span><strong>字符 / 有效速度</strong><small>Farnsworth 间隔将在正式训练引擎实现</small></span><b>{wpm} / {effectiveWpm} WPM</b></div><button className="secondary" onClick={() => navigate("keyer")}>前往音频实验室</button>
+              <p className="section-label">AUDIO DEFAULTS</p><div className="setting-row"><span><strong>默认音调</strong><small>练习和演示使用同一音频核心</small></span><b>{frequency} Hz</b></div><div className="setting-row"><span><strong>字符 / 有效速度</strong><small>Farnsworth 时间轴已进入领域核心</small></span><b>{wpm} / {effectiveWpm} WPM</b></div><button className="secondary" onClick={() => navigate("keyer")}>前往音频实验室</button>
             </section>
           </div>
         )}
