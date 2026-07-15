@@ -1,0 +1,14 @@
+{
+  "name": "@learning-morse/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@learning-morse/shared-types": "*",
+    "dexie": "4.4.4"
+  }
+}

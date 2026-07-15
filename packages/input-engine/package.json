@@ -1,0 +1,14 @@
+{
+  "name": "@learning-morse/input-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@learning-morse/morse-core": "*",
+    "@learning-morse/shared-types": "*"
+  }
+}

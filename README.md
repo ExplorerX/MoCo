@@ -2,7 +2,7 @@
 
 一个声音优先、离线优先的 Morse Code 学习与练习应用。项目目标是在 Web/PWA、Android、iOS 和桌面端复用同一套领域核心。
 
-当前完成到架构阶段 A：交互原型、Morse 领域核心、标准/Farnsworth 时间轴和共享数据协议均已建立。下一阶段将实现 TrainingEngine 与 IndexedDB 持久化。
+当前完成到架构阶段 B：Morse 领域核心、TrainingEngine、AudioEngine、InputEngine、IndexedDB/Dexie 仓储和会话恢复均已建立。下一阶段将进入正式 Web/PWA 页面与离线能力开发。
 
 ## 环境要求
 
@@ -38,6 +38,10 @@ npm test
 app/                         当前 Vinext/React 交互原型
 packages/morse-core/         字符表、编解码、输入判定和时间轴
 packages/shared-types/       练习、会话与作答数据协议
+packages/training-engine/    固定 seed 出题、会话状态机和评分
+packages/audio-engine/       Web Audio 调度、实时音调和生命周期
+packages/input-engine/       统一按键信号和点划判定
+packages/storage/            IndexedDB/Dexie schema、事务和恢复仓储
 tests/                       领域核心与渲染测试
 FeatureList.md               统一功能范围
 ProductSpec.md               产品行为规格

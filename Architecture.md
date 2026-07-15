@@ -6,11 +6,11 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | 0.2.0 |
+| 文档版本 | 0.3.0 |
 | 状态 | MVP 架构基线 |
 | 更新日期 | 2026-07-15 |
 | 适用范围 | Web/PWA 核心及 Android、iOS、桌面封装边界 |
-| 当前实现 | npm workspace；Vinext/React 原型已使用独立 `morse-core` |
+| 当前实现 | npm workspace；领域、训练、音频、输入和 IndexedDB 存储均已拆包 |
 | 目标实现 | React + TypeScript + Vite 的本地优先客户端应用 |
 
 ## 2. 架构驱动因素
@@ -38,11 +38,11 @@
 ### 3.2 当前原型不能直接视为正式实现
 
 - 页面切换仍是单文件内存状态，不是稳定路由。
-- 训练题目和统计为研究数据，不具备完整业务模型。
-- 尚无 IndexedDB 会话持久化、数据迁移和导入导出。
+- 训练会话已使用正式状态机和 IndexedDB；趋势图等展示统计仍含研究数据。
+- IndexedDB v1 schema 和事务仓储已建立，导入导出尚未实现。
 - 尚无 PWA Manifest、Service Worker 和离线更新策略。
 - 训练会话尚未提供速度配置界面；原型固定以 20/10 WPM 使用已验证的 Farnsworth 时间轴。
-- 主要逻辑仍集中在 `app/page.tsx`，需要按本文档拆分。
+- 页面组合和内存路由仍集中在 `app/page.tsx`；领域与平台服务已按本文档拆分。
 
 原型只作为交互和风险验证参考；正式代码迁移时保留已验证行为，不保留其单文件耦合方式。
 
@@ -496,10 +496,13 @@ MVP 仅记录本地、脱敏的技术诊断：
 
 ### 阶段 B：引擎与持久化
 
-- 提取 AudioEngine 和 InputEngine。
-- 实现 TrainingEngine 状态机。
-- 建立 IndexedDB schema、迁移和仓储。
-- 实现会话逐题持久化和恢复。
+**状态：已完成（2026-07-15）。**
+
+- [x] 提取 `packages/audio-engine` 和 `packages/input-engine` 并由原型消费。
+- [x] 实现纯 reducer 风格的 TrainingEngine 状态机和固定 seed 出题。
+- [x] 建立 IndexedDB/Dexie v1 schema、版本元数据和仓储接口。
+- [x] 实现 attempt、会话进度与字符统计的逐题原子持久化。
+- [x] 实现暂停、中断、刷新恢复和真实错题重练定义。
 
 ### 阶段 C：正式 Web/PWA
 
