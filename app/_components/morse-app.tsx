@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { AudioEngine } from "@learning-morse/audio-engine";
 import { InputEngine, keyboardSignal, pointerSignal } from "@learning-morse/input-engine";
 import { MORSE as MORSE_TABLE, REVERSE_MORSE, createFarnsworthTimeline, dotUnitMs, formatMorse as formatCode } from "@learning-morse/morse-core";
@@ -78,27 +78,54 @@ const GUIDED_LESSONS: readonly GuidedLesson[] = [
   { id: "mirror", title: "镜像节奏", characters: ["R", "K"], cues: ["短长短 ·—·", "长短长 —·—"] },
 ] as const;
 
-function KeyDurationGuide({ elapsedMs, thresholdMs, dotMs, pressing }: { elapsedMs: number; thresholdMs: number; dotMs: number; pressing: boolean }) {
+type KeyDurationGuideHandle = {
+  update: (elapsedMs: number, pressing: boolean) => void;
+};
+
+const KeyDurationGuide = forwardRef<KeyDurationGuideHandle, { elapsedMs: number; thresholdMs: number; dotMs: number; pressing: boolean }>(function KeyDurationGuide({ elapsedMs, thresholdMs, dotMs, pressing }, ref) {
   const maxMs = Math.max(dotMs * 4, thresholdMs * 1.5);
   const progress = Math.min(100, elapsedMs / maxMs * 100);
   const thresholdPosition = Math.min(92, thresholdMs / maxMs * 100);
   const zone = elapsedMs === 0 ? "idle" : elapsedMs < thresholdMs ? "dot" : "dash";
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const elapsedRef = useRef<HTMLElement | null>(null);
+  const statusRef = useRef<HTMLElement | null>(null);
+  const fillRef = useRef<HTMLElement | null>(null);
+  const needleRef = useRef<HTMLElement | null>(null);
+
+  const update = useCallback((liveElapsedMs: number, livePressing: boolean) => {
+    const safeElapsedMs = Math.max(0, liveElapsedMs);
+    const liveProgress = Math.min(100, safeElapsedMs / maxMs * 100);
+    const liveZone = safeElapsedMs === 0 ? "idle" : safeElapsedMs < thresholdMs ? "dot" : "dash";
+    if (rootRef.current) {
+      rootRef.current.dataset.zone = liveZone;
+      rootRef.current.setAttribute("aria-label", `按压时长 ${Math.round(safeElapsedMs)} 毫秒，点划阈值 ${Math.round(thresholdMs)} 毫秒`);
+    }
+    if (elapsedRef.current) elapsedRef.current.textContent = safeElapsedMs ? `${Math.round(safeElapsedMs)} ms` : "准备";
+    if (statusRef.current) statusRef.current.textContent = liveZone === "dot" ? "点 ·" : liveZone === "dash" ? "划 —" : livePressing ? "计时中" : "等待输入";
+    if (fillRef.current) fillRef.current.style.width = `${liveProgress}%`;
+    if (needleRef.current) needleRef.current.style.left = `${liveProgress}%`;
+  }, [maxMs, thresholdMs]);
+
+  useImperativeHandle(ref, () => ({ update }), [update]);
+  useEffect(() => update(elapsedMs, pressing), [elapsedMs, pressing, update]);
+
   return (
-    <div className="duration-guide" data-zone={zone} aria-label={`按压时长 ${Math.round(elapsedMs)} 毫秒，点划阈值 ${Math.round(thresholdMs)} 毫秒`}>
+    <div ref={rootRef} className="duration-guide" data-zone={zone} aria-label={`按压时长 ${Math.round(elapsedMs)} 毫秒，点划阈值 ${Math.round(thresholdMs)} 毫秒`}>
       <div className="duration-readout">
         <span>按压时长</span>
-        <strong>{elapsedMs ? `${Math.round(elapsedMs)} ms` : "准备"}</strong>
-        <b>{zone === "dot" ? "点 ·" : zone === "dash" ? "划 —" : pressing ? "计时中" : "等待输入"}</b>
+        <strong ref={elapsedRef}>{elapsedMs ? `${Math.round(elapsedMs)} ms` : "准备"}</strong>
+        <b ref={statusRef}>{zone === "dot" ? "点 ·" : zone === "dash" ? "划 —" : pressing ? "计时中" : "等待输入"}</b>
       </div>
       <div className="duration-track" aria-hidden="true">
-        <i className="duration-fill" style={{ width: `${progress}%` }} />
+        <i ref={fillRef} className="duration-fill" style={{ width: `${progress}%` }} />
         <i className="duration-threshold" style={{ left: `${thresholdPosition}%` }} />
-        <i className="duration-needle" style={{ left: `${progress}%` }} />
+        <i ref={needleRef} className="duration-needle" style={{ left: `${progress}%` }} />
       </div>
       <div className="duration-labels"><span>短按 · 点</span><span style={{ left: `${thresholdPosition}%` }}>阈值 {Math.round(thresholdMs)} ms</span><span>长按 · 划</span></div>
     </div>
   );
-}
+});
 
 const PRACTICE_MODE_MAP: Record<string, PracticeMode> = {
   sound: "sound-to-character",
@@ -186,6 +213,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const charTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const durationGuideRef = useRef<KeyDurationGuideHandle | null>(null);
   const pressFrameRef = useRef<number | null>(null);
   const pressStartedAtRef = useRef<number | null>(null);
   const learnEvaluationTimerRef = useRef<number | null>(null);
@@ -335,16 +363,19 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     if (pressFrameRef.current !== null) window.cancelAnimationFrame(pressFrameRef.current);
     pressFrameRef.current = null;
     pressStartedAtRef.current = null;
-    setPressElapsedMs(finalDuration);
+    const safeDuration = Math.max(0, finalDuration);
+    durationGuideRef.current?.update(safeDuration, false);
+    setPressElapsedMs(safeDuration);
   }, []);
 
   const startPressMeter = useCallback(() => {
     if (pressFrameRef.current !== null) window.cancelAnimationFrame(pressFrameRef.current);
     pressStartedAtRef.current = performance.now();
     setPressElapsedMs(0);
+    durationGuideRef.current?.update(0, true);
     const update = () => {
       if (pressStartedAtRef.current === null) return;
-      setPressElapsedMs(performance.now() - pressStartedAtRef.current);
+      durationGuideRef.current?.update(performance.now() - pressStartedAtRef.current, true);
       pressFrameRef.current = window.requestAnimationFrame(update);
     };
     pressFrameRef.current = window.requestAnimationFrame(update);
@@ -1037,7 +1068,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
           <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("settings")}>
             <span>06</span>设置
           </button>
-          <p>STAGE C.1 · 0.3.5</p>
+          <p>STAGE C.1 · 0.3.6</p>
         </div>
       </aside>}
 
@@ -1154,7 +1185,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
                 <div className={`learn-code-input ${learnInputState.tone}`} aria-label={`当前输入：${learnCode ? formatCode(learnCode) : "空"}`}>
                   {learnCode ? formatCode(learnCode) : learnResult === "correct" ? "✓ 可继续输入" : learnResult === "error" ? `× 正确：${formatCode(MORSE[activeCharacter])}` : "等待输入…"}
                 </div>
-                <KeyDurationGuide elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
+                <KeyDurationGuide ref={durationGuideRef} elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
                 {keyMode === "single" ? (
                   <button
                     className={isPressing ? "key-pad learn-pad pressing" : "key-pad learn-pad"}
@@ -1259,7 +1290,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
             </div>}
             {sessionMode === "character-to-keying" && !hasSessionAnswer && <div className="session-keyer">
               <div className="keying-code" aria-live="polite">{sessionCode ? formatCode(sessionCode) : "等待输入…"}</div>
-              <KeyDurationGuide elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
+              <KeyDurationGuide ref={durationGuideRef} elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
               {keyMode === "single" ? <button className={isPressing ? "key-pad compact pressing" : "key-pad compact"} disabled={trainingState?.snapshot.status !== "answering"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); void startLiveTone("pointer", "session"); }} onPointerUp={() => stopLiveTone("pointer")} onPointerCancel={() => stopLiveTone("pointer", true)}><span>按住发报</span><small>{bindings.single} · 短按点，长按划</small></button> : <div className="dual-pads"><button className="key-pad compact" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol(".", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol(".", "pointer", "session"); }}><span>点 ·</span><small>{bindings.dot}</small></button><button className="key-pad compact" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol("-", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol("-", "pointer", "session"); }}><span>划 —</span><small>{bindings.dash}</small></button></div>}
               <div className="button-row"><button className="secondary" onClick={() => setSessionCode((value) => value.slice(0, -1))} disabled={!sessionCode}>删除一划</button><button className="primary" onClick={() => void submitKeyingAnswer()} disabled={!sessionCode}>提交发报</button></div>
             </div>}
@@ -1362,7 +1393,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               {settingsSection === "input" && <><div className="segmented"><button className={keyMode === "single" ? "active" : ""} onClick={() => setKeyMode("single")}>单键时长</button><button className={keyMode === "dual" ? "active" : ""} onClick={() => setKeyMode("dual")}>点划双键</button></div><label className="setting-range"><span>自由发报自动提交等待 <b>{commitGapUnits.toFixed(1)} units · {Math.round(characterGapMs)} ms</b></span><input aria-label="自由发报自动提交等待" type="range" min="3" max="10" step="0.5" value={commitGapUnits} onChange={(event) => setCommitGapUnits(Number(event.target.value))} /></label><div className="binding-grid">{([['single','单键'],['dot','点'],['dash','划'],['submit','提交'],['delete','删除'],['replay','重播'],['pause','暂停']] as [keyof KeyBindings, string][]).map(([control, label]) => <label key={control}><span>{label}</span><input readOnly value={bindings[control]} onKeyDown={(event) => { event.preventDefault(); setBindings((value) => ({ ...value, [control]: event.code })); }} aria-label={`${label}按键，聚焦后按下新键`} /></label>)}</div>{new Set(Object.values(bindings)).size !== Object.values(bindings).length && <p className="inline-error" role="alert">检测到重复键位，请为每项操作设置不同按键。</p>}<div className="button-row"><button className="secondary" onClick={() => setBindings(DEFAULT_BINDINGS)}>恢复默认</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyF", dash: "KeyD" })}>左手预设</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyJ", dash: "KeyK" })}>右手预设</button><button className="text-button" onClick={() => navigate("keyer")}>前往按键实验室</button></div></>}
               {settingsSection === "training" && <><label className="setting-range"><span>默认题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label><label className="setting-range"><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => { const next = Number(event.target.value); setWpm(next); setEffectiveWpm((value) => Math.min(value, next)); }} /></label><label className="setting-range"><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label><label className="setting-text"><span>默认字符组</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} /></label><label className="setting-text"><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label></>}
               {settingsSection === "data" && <><div className="setting-row"><span><strong>本地训练数据库</strong><small>逐题写入 IndexedDB，可在刷新后恢复</small></span><b>{storageState === "ready" ? "READY" : storageState === "error" ? "ERROR" : "LOADING"}</b></div><div className="setting-row"><span><strong>已记录字符</strong><small>仅统计真实作答</small></span><b>{aggregatedCharacterStats.length}</b></div><input ref={importInputRef} className="visually-hidden" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLearningData(file); event.target.value = ""; }} /><div className="button-row data-actions"><button className="secondary" onClick={() => void exportLearningData()}>导出 JSON</button><button className="secondary" onClick={() => importInputRef.current?.click()}>导入数据</button><button className="primary danger-action" onClick={() => void clearLearningData()}>清空本机数据</button></div>{dataMessage && <p className="status-message" role="status">{dataMessage}</p>}</>}
-              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.5</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
+              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.6</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
             </section>
           </div>
         )}
