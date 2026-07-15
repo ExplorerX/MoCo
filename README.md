@@ -1,98 +1,71 @@
-# vinext-starter
+# Learning Morse Code
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+一个声音优先、离线优先的 Morse Code 学习与练习应用。项目目标是在 Web/PWA、Android、iOS 和桌面端复用同一套领域核心。
 
-## Prerequisites
+当前完成到架构阶段 A：交互原型、Morse 领域核心、标准/Farnsworth 时间轴和共享数据协议均已建立。下一阶段将实现 TrainingEngine 与 IndexedDB 持久化。
+
+## 环境要求
 
 - Node.js `>=22.13.0`
+- npm（随 Node.js 安装）
 
-## Quick Start
+## 本地运行
+
+首次拉取项目后执行：
 
 ```bash
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+开发服务器会打印实际访问地址，通常为 <http://localhost:3000>。如果端口已被占用，Vite 会自动选择 3001 等其他端口，请以终端输出为准。
 
-## Included Shape
+停止本地服务时，在运行服务的终端按 `Ctrl+C`。
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## 质量检查
 
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm run lint
+npx tsc --noEmit
+npm test
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+`npm test` 会执行生产构建、Morse 核心固定样本测试和服务端首屏渲染检查。
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## 工作区结构
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+```text
+app/                         当前 Vinext/React 交互原型
+packages/morse-core/         字符表、编解码、输入判定和时间轴
+packages/shared-types/       练习、会话与作答数据协议
+tests/                       领域核心与渲染测试
+FeatureList.md               统一功能范围
+ProductSpec.md               产品行为规格
+InformationArchitecture.md  页面与导航信息架构
+Architecture.md              技术架构与实施阶段
+ValidationReport.md          自动验证与真机测试状态
+```
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## Git 工作流
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+远程仓库为 `origin`，默认分支为 `main`。功能开发使用短生命周期分支：
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+```bash
+git switch -c feature/training-engine
+git add <changed-files>
+git commit -m "Implement training session state machine"
+git push -u origin feature/training-engine
+```
 
-## Useful Commands
+- `main` 只接收通过构建、类型、静态检查和相关测试的提交。
+- 功能分支建议使用 `feature/`、修复使用 `fix/`、文档使用 `docs/` 前缀。
+- 提交保持单一目的，不将无关格式化或临时产物混入功能提交。
+- 合并前通过 Pull Request 检查功能范围、测试结果和文档同步情况。
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## 项目文档
 
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [功能清单](./FeatureList.md)
+- [产品规格](./ProductSpec.md)
+- [信息架构](./InformationArchitecture.md)
+- [技术架构](./Architecture.md)
+- [验证报告](./ValidationReport.md)
