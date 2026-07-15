@@ -36,4 +36,8 @@ test("server-renders onboarding and stable application routes", async () => {
   const practice = await render("/practice");
   assert.equal(practice.status, 200);
   assert.match(await practice.text(), /每次认识两个节奏/);
+
+  const keyer = await render("/keyer");
+  assert.equal(keyer.status, 200);
+  assert.match(await keyer.text(), /自动提交等待/);
 });

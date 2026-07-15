@@ -41,6 +41,7 @@ type AppPreferences = {
   waveform: AudioWaveform;
   keyMode: KeyMode;
   thresholdUnits: number;
+  commitGapUnits: number;
   questionCount: number;
   practiceCharacters: string;
   shuffle: boolean;
@@ -145,6 +146,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const [waveform, setWaveform] = useState<AudioWaveform>("sine");
   const [keyMode, setKeyMode] = useState<KeyMode>("single");
   const [thresholdUnits, setThresholdUnits] = useState(2);
+  const [commitGapUnits, setCommitGapUnits] = useState(6);
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
   const [sequence, setSequence] = useState("");
   const [decoded, setDecoded] = useState("");
@@ -165,6 +167,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const [practiceError, setPracticeError] = useState("");
   const [learnFilter, setLearnFilter] = useState<LearnFilter>(() => learnFilterForCharacter(route.character));
   const [learnCode, setLearnCode] = useState("");
+  const [learnSuccessVisible, setLearnSuccessVisible] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [sessionCode, setSessionCode] = useState("");
   const [typedAnswer, setTypedAnswer] = useState("");
@@ -185,6 +188,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressFrameRef = useRef<number | null>(null);
   const pressStartedAtRef = useRef<number | null>(null);
+  const learnAutoClearTimerRef = useRef<number | null>(null);
+  const learnSuccessTimerRef = useRef<number | null>(null);
   const trainingStateRef = useRef<TrainingState | null>(null);
   const routeRef = useRef<AppRoute>(route);
   const activeInputTargetRef = useRef<"keyer" | "session" | "learn">("keyer");
@@ -193,6 +198,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
 
   const dotMs = dotUnitMs(wpm);
   const thresholdMs = dotMs * thresholdUnits;
+  const characterGapMs = dotMs * commitGapUnits;
+  const wordGapMs = dotMs * (commitGapUnits + 4);
   const sessionStep = trainingState?.snapshot.currentQuestionIndex ?? 0;
   const questions = trainingState?.snapshot.questions ?? [];
   const currentQuestion = trainingState ? getCurrentQuestion(trainingState) : null;
@@ -228,6 +235,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       }
       setSessionCode("");
       setLearnCode("");
+      setLearnSuccessVisible(false);
       setPressElapsedMs(0);
       setTypedAnswer("");
       const nextRoute = routeFromPath(window.location.pathname);
@@ -336,11 +344,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     setPressElapsedMs(0);
     const update = () => {
       if (pressStartedAtRef.current === null) return;
-      setPressElapsedMs(Math.min(performance.now() - pressStartedAtRef.current, dotMs * 4));
+      setPressElapsedMs(performance.now() - pressStartedAtRef.current);
       pressFrameRef.current = window.requestAnimationFrame(update);
     };
     pressFrameRef.current = window.requestAnimationFrame(update);
-  }, [dotMs]);
+  }, []);
 
   const commitSequence = useCallback(() => {
     const current = sequenceRef.current;
@@ -358,18 +366,20 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       sequenceRef.current = next;
       return next;
     });
-    charTimerRef.current = setTimeout(commitSequence, dotMs * 3);
+    charTimerRef.current = setTimeout(commitSequence, characterGapMs);
     wordTimerRef.current = setTimeout(() => {
       commitSequence();
       setDecoded((value) => value.endsWith(" ") || value.length === 0 ? value : `${value} `);
-    }, dotMs * 7);
-  }, [clearCommitTimers, commitSequence, dotMs]);
+    }, wordGapMs);
+  }, [characterGapMs, clearCommitTimers, commitSequence, wordGapMs]);
 
   const appendSessionSymbol = useCallback((symbol: "." | "-") => {
     setSessionCode((value) => `${value}${symbol}`.slice(0, 6));
   }, []);
 
   const appendLearnSymbol = useCallback((symbol: "." | "-") => {
+    setLearnSuccessVisible(false);
+    if (learnSuccessTimerRef.current) clearTimeout(learnSuccessTimerRef.current);
     setLearnCode((value) => `${value}${symbol}`.slice(0, 6));
   }, []);
 
@@ -486,6 +496,28 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     };
   }, [bindings, keyMode, sessionMode, startLiveTone, stopLiveTone, tapSymbol, view]);
 
+  useEffect(() => {
+    if (view !== "learn" || learnCode !== MORSE[activeCharacter]) return;
+    const timer = window.setTimeout(() => {
+      learnAutoClearTimerRef.current = null;
+      setLearnCode("");
+      setPressElapsedMs(0);
+      setLearnSuccessVisible(true);
+      if (learnSuccessTimerRef.current) clearTimeout(learnSuccessTimerRef.current);
+      learnSuccessTimerRef.current = window.setTimeout(() => {
+        learnSuccessTimerRef.current = null;
+        setLearnSuccessVisible(false);
+      }, 900);
+    }, 500);
+    learnAutoClearTimerRef.current = timer;
+    return () => {
+      if (learnAutoClearTimerRef.current === timer) {
+        clearTimeout(timer);
+        learnAutoClearTimerRef.current = null;
+      }
+    };
+  }, [activeCharacter, learnCode, view]);
+
   const getRepository = useCallback(async () => {
     if (!repositoryRef.current) repositoryRef.current = createSessionRepository();
     await repositoryRef.current.initialize();
@@ -516,6 +548,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
           setWaveform(saved.waveform ?? "sine");
           setKeyMode(saved.keyMode ?? "single");
           setThresholdUnits(saved.thresholdUnits ?? 2);
+          setCommitGapUnits(saved.commitGapUnits ?? 6);
           setQuestionCount(saved.questionCount ?? 4);
           setPracticeCharacters(saved.practiceCharacters ?? "K M R S");
           setShuffleQuestions(saved.shuffle ?? true);
@@ -540,13 +573,13 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     if (!preferencesLoaded) return;
     const timer = window.setTimeout(() => {
       const preferences: AppPreferences = {
-        frequency, wpm, effectiveWpm, volume, waveform, keyMode, thresholdUnits,
+        frequency, wpm, effectiveWpm, volume, waveform, keyMode, thresholdUnits, commitGapUnits,
         questionCount, practiceCharacters, shuffle: shuffleQuestions, timeoutMs, bindings,
       };
       void getRepository().then((repository) => repository.saveSetting("preferences", preferences)).catch(() => setStorageState("error"));
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [bindings, effectiveWpm, frequency, getRepository, keyMode, practiceCharacters, preferencesLoaded, questionCount, shuffleQuestions, thresholdUnits, timeoutMs, volume, waveform, wpm]);
+  }, [bindings, commitGapUnits, effectiveWpm, frequency, getRepository, keyMode, practiceCharacters, preferencesLoaded, questionCount, shuffleQuestions, thresholdUnits, timeoutMs, volume, waveform, wpm]);
 
   useEffect(() => {
     const sessionId = route.sessionId ?? route.resultSessionId;
@@ -587,6 +620,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     clearCommitTimers();
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
     if (pressFrameRef.current !== null) window.cancelAnimationFrame(pressFrameRef.current);
+    if (learnAutoClearTimerRef.current) clearTimeout(learnAutoClearTimerRef.current);
+    if (learnSuccessTimerRef.current) clearTimeout(learnSuccessTimerRef.current);
     if (audioEngineRef.current) void audioEngineRef.current.close();
   }, [clearCommitTimers]);
 
@@ -919,7 +954,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const activeCharacterStat = aggregatedCharacterStats.find((stat) => stat.character === activeCharacter) ?? null;
   const activeGuidedLesson = GUIDED_LESSONS.find((lesson) => lesson.id === trainingState?.snapshot.definition.guidedLessonId) ?? null;
   const learnInputState = learnCode === ""
-    ? { label: "等待输入", tone: "idle" }
+    ? learnSuccessVisible ? { label: "输入正确 · 已清空", tone: "success" } : { label: "等待输入", tone: "idle" }
     : learnCode === MORSE[activeCharacter]
       ? { label: "输入正确", tone: "success" }
       : MORSE[activeCharacter].startsWith(learnCode)
@@ -978,7 +1013,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
           <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("settings")}>
             <span>06</span>设置
           </button>
-          <p>STAGE C.1 · 0.3.3</p>
+          <p>STAGE C.1 · 0.3.4</p>
         </div>
       </aside>}
 
@@ -1066,13 +1101,13 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
             <section className="card character-browser">
               <div className="section-heading compact"><div><p className="section-label">REFERENCE</p><h2>国际 Morse 字符</h2></div><span className="count">{characterGroups.length} / {Object.keys(MORSE).length}</span></div>
               <div className="filter-row" aria-label="字符分类">
-                <button className={learnFilter === "letters" ? "chip active" : "chip"} aria-pressed={learnFilter === "letters"} onClick={() => { setLearnFilter("letters"); setLearnCode(""); setPressElapsedMs(0); goTo("/learn/character/K"); }}>字母</button>
-                <button className={learnFilter === "numbers" ? "chip active" : "chip"} aria-pressed={learnFilter === "numbers"} onClick={() => { setLearnFilter("numbers"); setLearnCode(""); setPressElapsedMs(0); goTo("/learn/character/0"); }}>数字</button>
-                <button className={learnFilter === "punctuation" ? "chip active" : "chip"} aria-pressed={learnFilter === "punctuation"} onClick={() => { setLearnFilter("punctuation"); setLearnCode(""); setPressElapsedMs(0); goTo("/learn/character/."); }}>标点</button>
+                <button className={learnFilter === "letters" ? "chip active" : "chip"} aria-pressed={learnFilter === "letters"} onClick={() => { setLearnFilter("letters"); setLearnCode(""); setLearnSuccessVisible(false); setPressElapsedMs(0); goTo("/learn/character/K"); }}>字母</button>
+                <button className={learnFilter === "numbers" ? "chip active" : "chip"} aria-pressed={learnFilter === "numbers"} onClick={() => { setLearnFilter("numbers"); setLearnCode(""); setLearnSuccessVisible(false); setPressElapsedMs(0); goTo("/learn/character/0"); }}>数字</button>
+                <button className={learnFilter === "punctuation" ? "chip active" : "chip"} aria-pressed={learnFilter === "punctuation"} onClick={() => { setLearnFilter("punctuation"); setLearnCode(""); setLearnSuccessVisible(false); setPressElapsedMs(0); goTo("/learn/character/."); }}>标点</button>
               </div>
               <div className="character-grid">
                 {characterGroups.map((character) => (
-                  <button key={character} className={activeCharacter === character ? "character active" : "character"} onClick={() => { stopPlayback(); setLearnCode(""); setPressElapsedMs(0); goTo(`/learn/character/${encodeURIComponent(character)}`); }}>
+                  <button key={character} className={activeCharacter === character ? "character active" : "character"} onClick={() => { stopPlayback(); setLearnCode(""); setLearnSuccessVisible(false); setPressElapsedMs(0); goTo(`/learn/character/${encodeURIComponent(character)}`); }}>
                     <strong>{character}</strong><span>{formatCode(MORSE[character])}</span>
                   </button>
                 ))}
@@ -1093,7 +1128,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
                   <strong className={learnInputState.tone} aria-live="polite">{learnInputState.label}</strong>
                 </div>
                 <div className={`learn-code-input ${learnInputState.tone}`} aria-label={`当前输入：${learnCode ? formatCode(learnCode) : "空"}`}>
-                  {learnCode ? formatCode(learnCode) : "等待输入…"}
+                  {learnCode ? formatCode(learnCode) : learnSuccessVisible ? "✓ 可继续输入" : "等待输入…"}
                 </div>
                 <KeyDurationGuide elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
                 {keyMode === "single" ? (
@@ -1241,6 +1276,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               <div className="signal-monitor">
                 <div><span>点单位</span><strong>{Math.round(dotMs)} ms</strong></div>
                 <div><span>判定阈值</span><strong>{Math.round(thresholdMs)} ms</strong></div>
+                <div><span>提交等待</span><strong>{Math.round(characterGapMs)} ms</strong></div>
                 <div><span>声音状态</span><strong>{audioState === "ready" ? "RUNNING" : "LOCKED"}</strong></div>
                 <div className="signal-line" data-active={isPressing}><i /></div>
               </div>
@@ -1269,6 +1305,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
                 <p className="section-label">LIVE PARAMETERS</p>
                 <label><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => setWpm(Number(event.target.value))} /></label>
                 <label><span>点划阈值 <b>{thresholdUnits.toFixed(1)} units</b></span><input type="range" min="1.4" max="2.6" step="0.1" value={thresholdUnits} onChange={(event) => setThresholdUnits(Number(event.target.value))} /></label>
+                <label><span>自动提交等待 <b>{commitGapUnits.toFixed(1)} units · {Math.round(characterGapMs)} ms</b></span><input aria-label="自动提交等待" type="range" min="3" max="10" step="0.5" value={commitGapUnits} onChange={(event) => setCommitGapUnits(Number(event.target.value))} /></label>
                 <label><span>音调 <b>{frequency} Hz</b></span><input type="range" min="400" max="900" step="25" value={frequency} onChange={(event) => setFrequency(Number(event.target.value))} /></label>
                 <label><span>音量 <b>{Math.round(volume * 100)}%</b></span><input type="range" min="0.1" max="1" step="0.05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></label>
                 <button className="secondary full" onClick={() => void ensureAudio()}>启用 / 恢复声音</button>
@@ -1301,10 +1338,10 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               <p className="section-label">{settingsMeta[settingsSection].eyebrow}</p><h2>{settingsMeta[settingsSection].title}</h2><p>{settingsMeta[settingsSection].copy}</p>
               {settingsSection === "appearance" && <div className="theme-grid">{(["light", "dark", "amber", "contrast"] as Theme[]).map((item) => <button key={item} className={theme === item ? `theme-swatch ${item} active` : `theme-swatch ${item}`} onClick={() => setTheme(item)}><i /><span>{item === "light" ? "浅色" : item === "dark" ? "深色" : item === "amber" ? "无线电琥珀" : "高对比度"}</span></button>)}</div>}
               {settingsSection === "audio" && <><div className="segmented" aria-label="音色"><button className={waveform === "sine" ? "active" : ""} onClick={() => setWaveform("sine")}>正弦波</button><button className={waveform === "square" ? "active" : ""} onClick={() => setWaveform("square")}>方波</button></div><label className="setting-range"><span>默认音调 <b>{frequency} Hz</b></span><input type="range" min="400" max="900" step="25" value={frequency} onChange={(event) => setFrequency(Number(event.target.value))} /></label><label className="setting-range"><span>音量 <b>{Math.round(volume * 100)}%</b></span><input type="range" min="0.1" max="1" step="0.05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></label><div className="button-row"><button className="secondary" onClick={() => void playText("TEST")}>播放测试音</button><button className="text-button" onClick={stopPlayback}>停止播放</button></div></>}
-              {settingsSection === "input" && <><div className="segmented"><button className={keyMode === "single" ? "active" : ""} onClick={() => setKeyMode("single")}>单键时长</button><button className={keyMode === "dual" ? "active" : ""} onClick={() => setKeyMode("dual")}>点划双键</button></div><div className="binding-grid">{([['single','单键'],['dot','点'],['dash','划'],['submit','提交'],['delete','删除'],['replay','重播'],['pause','暂停']] as [keyof KeyBindings, string][]).map(([control, label]) => <label key={control}><span>{label}</span><input readOnly value={bindings[control]} onKeyDown={(event) => { event.preventDefault(); setBindings((value) => ({ ...value, [control]: event.code })); }} aria-label={`${label}按键，聚焦后按下新键`} /></label>)}</div>{new Set(Object.values(bindings)).size !== Object.values(bindings).length && <p className="inline-error" role="alert">检测到重复键位，请为每项操作设置不同按键。</p>}<div className="button-row"><button className="secondary" onClick={() => setBindings(DEFAULT_BINDINGS)}>恢复默认</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyF", dash: "KeyD" })}>左手预设</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyJ", dash: "KeyK" })}>右手预设</button><button className="text-button" onClick={() => navigate("keyer")}>前往按键实验室</button></div></>}
+              {settingsSection === "input" && <><div className="segmented"><button className={keyMode === "single" ? "active" : ""} onClick={() => setKeyMode("single")}>单键时长</button><button className={keyMode === "dual" ? "active" : ""} onClick={() => setKeyMode("dual")}>点划双键</button></div><label className="setting-range"><span>自由发报自动提交等待 <b>{commitGapUnits.toFixed(1)} units · {Math.round(characterGapMs)} ms</b></span><input aria-label="自由发报自动提交等待" type="range" min="3" max="10" step="0.5" value={commitGapUnits} onChange={(event) => setCommitGapUnits(Number(event.target.value))} /></label><div className="binding-grid">{([['single','单键'],['dot','点'],['dash','划'],['submit','提交'],['delete','删除'],['replay','重播'],['pause','暂停']] as [keyof KeyBindings, string][]).map(([control, label]) => <label key={control}><span>{label}</span><input readOnly value={bindings[control]} onKeyDown={(event) => { event.preventDefault(); setBindings((value) => ({ ...value, [control]: event.code })); }} aria-label={`${label}按键，聚焦后按下新键`} /></label>)}</div>{new Set(Object.values(bindings)).size !== Object.values(bindings).length && <p className="inline-error" role="alert">检测到重复键位，请为每项操作设置不同按键。</p>}<div className="button-row"><button className="secondary" onClick={() => setBindings(DEFAULT_BINDINGS)}>恢复默认</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyF", dash: "KeyD" })}>左手预设</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyJ", dash: "KeyK" })}>右手预设</button><button className="text-button" onClick={() => navigate("keyer")}>前往按键实验室</button></div></>}
               {settingsSection === "training" && <><label className="setting-range"><span>默认题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label><label className="setting-range"><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => { const next = Number(event.target.value); setWpm(next); setEffectiveWpm((value) => Math.min(value, next)); }} /></label><label className="setting-range"><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label><label className="setting-text"><span>默认字符组</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} /></label><label className="setting-text"><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label></>}
               {settingsSection === "data" && <><div className="setting-row"><span><strong>本地训练数据库</strong><small>逐题写入 IndexedDB，可在刷新后恢复</small></span><b>{storageState === "ready" ? "READY" : storageState === "error" ? "ERROR" : "LOADING"}</b></div><div className="setting-row"><span><strong>已记录字符</strong><small>仅统计真实作答</small></span><b>{aggregatedCharacterStats.length}</b></div><input ref={importInputRef} className="visually-hidden" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLearningData(file); event.target.value = ""; }} /><div className="button-row data-actions"><button className="secondary" onClick={() => void exportLearningData()}>导出 JSON</button><button className="secondary" onClick={() => importInputRef.current?.click()}>导入数据</button><button className="primary danger-action" onClick={() => void clearLearningData()}>清空本机数据</button></div>{dataMessage && <p className="status-message" role="status">{dataMessage}</p>}</>}
-              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.3</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
+              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>Stage C.1 · Web / PWA</small></span><b>0.3.4</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
             </section>
           </div>
         )}

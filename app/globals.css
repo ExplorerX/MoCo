@@ -252,7 +252,7 @@ button { color: inherit; }
 .decoded-output p b { color: var(--accent); margin-left: 8px; }
 .output-actions { display: flex; gap: 15px; }
 .output-actions button { border: 0; padding: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
-.signal-monitor { margin: 14px 0; border: 1px solid var(--line); min-height: 78px; display: grid; grid-template-columns: repeat(3, auto) minmax(120px, 1fr); align-items: center; }
+.signal-monitor { margin: 14px 0; border: 1px solid var(--line); min-height: 78px; display: grid; grid-template-columns: repeat(4, auto) minmax(120px, 1fr); align-items: center; }
 .signal-monitor > div:not(.signal-line) { padding: 12px 15px; border-right: 1px solid var(--line); }
 .signal-monitor span, .signal-monitor strong { display: block; }
 .signal-monitor span { color: var(--muted); font-size: 9px; }
@@ -414,7 +414,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 13px
   .lab-workbench { margin-inline: -16px; border-inline: 0; }
   .lab-toolbar { align-items: stretch; flex-direction: column; }
   .segmented { display: grid; grid-template-columns: 1fr 1fr; }
-  .signal-monitor { grid-template-columns: repeat(3, 1fr); }
+  .signal-monitor { grid-template-columns: repeat(2, 1fr); }
   .signal-monitor > div:not(.signal-line) { padding: 10px; }
   .signal-line { grid-column: 1 / -1; height: 32px; border-top: 1px solid var(--line); }
   .key-pad { min-height: 250px; }
