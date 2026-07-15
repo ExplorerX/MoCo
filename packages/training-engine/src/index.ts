@@ -42,6 +42,9 @@ export function validatePracticeDefinition(definition: PracticeDefinition): void
     throw new RangeError("Question count must be an integer between 1 and 1000");
   }
   if (!definition.seed.trim()) throw new RangeError("A deterministic seed is required");
+  if (definition.guidedLessonId !== undefined && !definition.guidedLessonId.trim()) {
+    throw new RangeError("Guided lesson id must not be empty");
+  }
   if (definition.timeoutMs !== null && (!Number.isFinite(definition.timeoutMs) || definition.timeoutMs <= 0)) {
     throw new RangeError("Timeout must be null or greater than zero");
   }

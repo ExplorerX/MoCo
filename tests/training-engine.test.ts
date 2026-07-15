@@ -52,6 +52,16 @@ test("supports an ordered practice sequence when shuffle is disabled", () => {
   assert.deepEqual(ordered.map((question) => question.target), ["K", "M", "R", "S", "K", "M"]);
 });
 
+test("preserves guided lesson metadata in the session snapshot", () => {
+  const guided = createTrainingSession({ ...definition, mode: "character-to-keying", questionCount: 8, guidedLessonId: "signals" }, {
+    sessionId: "session-guided",
+    now: "2026-07-15T09:00:00.000Z",
+  });
+  assert.equal(guided.snapshot.definition.guidedLessonId, "signals");
+  assert.equal(guided.snapshot.questions.length, 8);
+  assert.throws(() => generateQuestions({ ...definition, guidedLessonId: "" }, "invalid-guided"), /must not be empty/);
+});
+
 test("runs a complete session through prompt, answer, feedback and summary", () => {
   const shortDefinition = { ...definition, questionCount: 2 };
   let state = createTrainingSession(shortDefinition, {

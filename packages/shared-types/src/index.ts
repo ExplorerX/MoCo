@@ -50,6 +50,7 @@ export type PracticeDefinition = {
   timeoutMs: number | null;
   feedbackMode: FeedbackMode;
   shuffle?: boolean;
+  guidedLessonId?: string;
 };
 
 export type Attempt = {
