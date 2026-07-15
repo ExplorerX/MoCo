@@ -17,6 +17,8 @@
 
 - [ProductSpec.md](./ProductSpec.md)：产品目标、用户、业务规则、MVP 决策及验收口径。
 - [InformationArchitecture.md](./InformationArchitecture.md)：导航、路由、页面层级和页面状态。
+- [Architecture.md](./Architecture.md)：目标技术架构、模块边界、数据模型和跨端策略。
+- [ValidationReport.md](./ValidationReport.md)：已执行验证、已知问题及真机测试清单。
 
 ## 2. 产品原则
 

@@ -1,24 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MORSE as MORSE_TABLE, REVERSE_MORSE, classifyPress, createStandardTimeline, dotUnitMs, formatMorse as formatCode } from "../lib/morse-core";
 
 type View = "home" | "learn" | "practice" | "session" | "keyer" | "stats" | "settings";
 type Theme = "light" | "dark" | "amber" | "contrast";
 type KeyMode = "single" | "dual";
 type PressSample = { duration: number; symbol: "." | "-"; at: string };
 
-const MORSE: Record<string, string> = {
-  A: ".-", B: "-...", C: "-.-.", D: "-..", E: ".", F: "..-.", G: "--.",
-  H: "....", I: "..", J: ".---", K: "-.-", L: ".-..", M: "--", N: "-.",
-  O: "---", P: ".--.", Q: "--.-", R: ".-.", S: "...", T: "-", U: "..-",
-  V: "...-", W: ".--", X: "-..-", Y: "-.--", Z: "--..",
-  "0": "-----", "1": ".----", "2": "..---", "3": "...--", "4": "....-",
-  "5": ".....", "6": "-....", "7": "--...", "8": "---..", "9": "----.",
-};
-
-const REVERSE_MORSE = Object.fromEntries(
-  Object.entries(MORSE).map(([character, code]) => [code, character]),
-);
+const MORSE: Readonly<Record<string, string>> = MORSE_TABLE;
 
 const NAV: { id: View; label: string; mark: string }[] = [
   { id: "home", label: "首页", mark: "01" },
@@ -35,13 +25,25 @@ const PRACTICE_MODES = [
   { id: "send", eyebrow: "敲", title: "字符 → 发报", copy: "用真实按压时长发出目标字符。" },
 ];
 
-function formatCode(code: string) {
-  return code.replaceAll(".", "·").replaceAll("-", "—");
-}
-
 function isEditableTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
   return Boolean(element?.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function scheduleOscillator(context: AudioContext, start: number, durationMs: number, frequency: number, volume: number) {
+  const end = start + durationMs / 1000;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(frequency, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.006);
+  gain.gain.setValueAtTime(Math.max(0.001, volume), Math.max(start + 0.006, end - 0.008));
+  gain.gain.exponentialRampToValueAtTime(0.0001, end);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(start);
+  oscillator.stop(end + 0.012);
+  return end;
 }
 
 export default function MorsePrototype() {
@@ -49,7 +51,7 @@ export default function MorsePrototype() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [frequency, setFrequency] = useState(600);
   const [wpm, setWpm] = useState(20);
-  const [effectiveWpm, setEffectiveWpm] = useState(10);
+  const [effectiveWpm] = useState(10);
   const [volume, setVolume] = useState(0.6);
   const [keyMode, setKeyMode] = useState<KeyMode>("single");
   const [thresholdUnits, setThresholdUnits] = useState(2);
@@ -73,13 +75,15 @@ export default function MorsePrototype() {
   const wordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const dotMs = 1200 / wpm;
+  const dotMs = dotUnitMs(wpm);
   const thresholdMs = dotMs * thresholdUnits;
   const questions = ["K", "M", "R", "S"];
 
   useEffect(() => {
     const saved = window.localStorage.getItem("morse-prototype-theme") as Theme | null;
-    if (saved && ["light", "dark", "amber", "contrast"].includes(saved)) setTheme(saved);
+    if (!saved || !["light", "dark", "amber", "contrast"].includes(saved)) return;
+    const frame = window.requestAnimationFrame(() => setTheme(saved));
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
@@ -109,21 +113,8 @@ export default function MorsePrototype() {
   const scheduleTone = useCallback(async (durationMs: number, offsetMs = 0) => {
     const context = await ensureAudio();
     if (!context) return 0;
-
     const start = context.currentTime + 0.025 + offsetMs / 1000;
-    const end = start + durationMs / 1000;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, volume), start + 0.006);
-    gain.gain.setValueAtTime(Math.max(0.001, volume), Math.max(start + 0.006, end - 0.008));
-    gain.gain.exponentialRampToValueAtTime(0.0001, end);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start(start);
-    oscillator.stop(end + 0.012);
-    return end;
+    return scheduleOscillator(context, start, durationMs, frequency, volume);
   }, [ensureAudio, frequency, volume]);
 
   const playText = useCallback(async (text: string) => {
@@ -132,29 +123,17 @@ export default function MorsePrototype() {
     if (!context) return;
 
     setIsPlaying(true);
-    let cursorMs = 0;
-    const unit = 1200 / wpm;
-    const words = text.trim().toUpperCase().split(/\s+/);
-
-    for (let wordIndex = 0; wordIndex < words.length; wordIndex += 1) {
-      const word = words[wordIndex];
-      for (let charIndex = 0; charIndex < word.length; charIndex += 1) {
-        const code = MORSE[word[charIndex]];
-        if (!code) continue;
-        for (let elementIndex = 0; elementIndex < code.length; elementIndex += 1) {
-          const duration = code[elementIndex] === "." ? unit : unit * 3;
-          void scheduleTone(duration, cursorMs);
-          cursorMs += duration;
-          if (elementIndex < code.length - 1) cursorMs += unit;
-        }
-        if (charIndex < word.length - 1) cursorMs += unit * 3;
-      }
-      if (wordIndex < words.length - 1) cursorMs += unit * 7;
-    }
+    const timeline = createStandardTimeline(text, wpm);
+    const baseTime = context.currentTime + 0.03;
+    timeline.forEach((event) => {
+      scheduleOscillator(context, baseTime + event.startMs / 1000, event.durationMs, frequency, volume);
+    });
+    const lastEvent = timeline.at(-1);
+    const cursorMs = lastEvent ? lastEvent.startMs + lastEvent.durationMs : 0;
 
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
     playbackTimerRef.current = setTimeout(() => setIsPlaying(false), cursorMs + 100);
-  }, [ensureAudio, isPlaying, scheduleTone, wpm]);
+  }, [ensureAudio, frequency, isPlaying, volume, wpm]);
 
   const clearCommitTimers = useCallback(() => {
     if (charTimerRef.current) clearTimeout(charTimerRef.current);
@@ -206,7 +185,7 @@ export default function MorsePrototype() {
   const stopLiveTone = useCallback(() => {
     if (pressStartRef.current === null) return;
     const duration = Math.max(1, performance.now() - pressStartRef.current);
-    const symbol: "." | "-" = duration < thresholdMs ? "." : "-";
+    const symbol = classifyPress(duration, wpm, thresholdUnits);
     const live = liveToneRef.current;
     const context = audioContextRef.current;
     if (live && context) {
@@ -224,7 +203,7 @@ export default function MorsePrototype() {
       { duration: Math.round(duration), symbol, at: new Date().toLocaleTimeString("zh-CN", { hour12: false }) },
       ...value,
     ].slice(0, 8));
-  }, [appendSymbol, thresholdMs]);
+  }, [appendSymbol, thresholdUnits, wpm]);
 
   const tapSymbol = useCallback(async (symbol: "." | "-") => {
     const duration = symbol === "." ? dotMs : dotMs * 3;
