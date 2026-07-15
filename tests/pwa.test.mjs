@@ -15,5 +15,5 @@ test("service worker preserves user-controlled updates and navigation fallback",
   assert.match(worker, /request\.mode === "navigate"/);
   assert.match(worker, /SKIP_WAITING/);
   assert.doesNotMatch(worker, /install[\s\S]{0,160}skipWaiting/);
-  assert.match(worker, /caches\.match\("\/home"\)/);
+  assert.match(worker, /caches\.match\("\/"\)/);
 });

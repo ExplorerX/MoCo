@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  advanceTraining,
   createTrainingSession,
   markPromptComplete,
   startTraining,
@@ -94,6 +95,53 @@ test("recovers the most recently updated incomplete session", async () => {
   assert.equal(recovered?.snapshot.id, "newer-session");
   const recent = await repository.getRecentSessions(1);
   assert.deepEqual(recent.map((session) => session.id), ["newer-session"]);
+  repository.close();
+  await repository.database.delete();
+});
+
+test("persists preferences and round-trips a versioned local export", async () => {
+  const source = createSessionRepository(`morse-export-source-${crypto.randomUUID()}`);
+  await source.initialize();
+  await source.saveSetting("preferences", { waveform: "square", questionCount: 12 });
+  assert.deepEqual(await source.getSetting("preferences"), { waveform: "square", questionCount: 12 });
+  const payload = await source.exportData();
+  assert.equal(payload.schemaVersion, DATA_SCHEMA_VERSION);
+  assert.equal(payload.tables.settings.length, 1);
+
+  const target = createSessionRepository(`morse-export-target-${crypto.randomUUID()}`);
+  await target.initialize();
+  await target.importData(payload);
+  assert.deepEqual(await target.getSetting("preferences"), { waveform: "square", questionCount: 12 });
+  await target.clearAll();
+  assert.equal(await target.getSetting("preferences"), null);
+
+  source.close();
+  target.close();
+  await source.database.delete();
+  await target.database.delete();
+});
+
+test("finds the latest completed session that actually contains mistakes", async () => {
+  const repository = createSessionRepository(`morse-mistakes-${crypto.randomUUID()}`);
+  await repository.initialize();
+  const oneQuestion = { ...definition, questionCount: 1 };
+
+  const complete = async (id: string, startedAt: string, response: "correct" | "wrong") => {
+    let state = createTrainingSession(oneQuestion, { sessionId: id, now: startedAt });
+    state = startTraining(state, new Date(Date.parse(startedAt) + 100).toISOString());
+    state = markPromptComplete(state, new Date(Date.parse(startedAt) + 200).toISOString());
+    await repository.createSession(state.snapshot);
+    const answer = response === "correct" ? state.snapshot.questions[0].target : "?";
+    const submitted = submitTrainingAnswer(state, answer, new Date(Date.parse(startedAt) + 300).toISOString());
+    await repository.saveAttemptAndSession(submitted.attempt, submitted.state.snapshot);
+    state = advanceTraining(submitted.state, new Date(Date.parse(startedAt) + 400).toISOString());
+    await repository.saveSession(state.snapshot);
+  };
+
+  await complete("older-with-mistake", "2026-07-15T13:00:00.000Z", "wrong");
+  await complete("newer-perfect", "2026-07-15T13:01:00.000Z", "correct");
+  assert.equal((await repository.getLatestCompletedSession())?.snapshot.id, "newer-perfect");
+  assert.equal((await repository.getLatestCompletedSession(true))?.snapshot.id, "older-with-mistake");
   repository.close();
   await repository.database.delete();
 });

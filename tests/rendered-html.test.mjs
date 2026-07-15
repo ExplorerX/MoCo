@@ -20,7 +20,7 @@ test("server-renders onboarding and stable application routes", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Morse Learning Lab<\/title>/i);
-  assert.match(html, /先听声音，再认识点划/);
+  assert.match(html, /点短，划长/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 
   const direct = await render("/practice/setup/sound");

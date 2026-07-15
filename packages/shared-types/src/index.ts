@@ -49,6 +49,7 @@ export type PracticeDefinition = {
   timing: TimingProfile;
   timeoutMs: number | null;
   feedbackMode: FeedbackMode;
+  shuffle?: boolean;
 };
 
 export type Attempt = {

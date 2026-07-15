@@ -47,6 +47,11 @@ test("generates deterministic questions without four identical targets in a row"
   }
 });
 
+test("supports an ordered practice sequence when shuffle is disabled", () => {
+  const ordered = generateQuestions({ ...definition, questionCount: 6, shuffle: false }, "session-ordered");
+  assert.deepEqual(ordered.map((question) => question.target), ["K", "M", "R", "S", "K", "M"]);
+});
+
 test("runs a complete session through prompt, answer, feedback and summary", () => {
   const shortDefinition = { ...definition, questionCount: 2 };
   let state = createTrainingSession(shortDefinition, {

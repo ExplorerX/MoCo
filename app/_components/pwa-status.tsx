@@ -2,19 +2,32 @@
 
 import { useEffect, useState } from "react";
 
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
 export default function PwaStatus({ hasActiveSession }: { hasActiveSession: boolean }) {
   const [online, setOnline] = useState(true);
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
 
   useEffect(() => {
     const onOnline = () => setOnline(true);
     const onOffline = () => setOnline(false);
+    const onInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    queueMicrotask(() => setOnline(navigator.onLine));
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    window.addEventListener("beforeinstallprompt", onInstallPrompt);
 
     if (!("serviceWorker" in navigator)) return () => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      window.removeEventListener("beforeinstallprompt", onInstallPrompt);
     };
 
     let disposed = false;
@@ -35,6 +48,7 @@ export default function PwaStatus({ hasActiveSession }: { hasActiveSession: bool
       disposed = true;
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      window.removeEventListener("beforeinstallprompt", onInstallPrompt);
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
     };
   }, []);
@@ -44,10 +58,18 @@ export default function PwaStatus({ hasActiveSession }: { hasActiveSession: bool
     waiting.postMessage({ type: "SKIP_WAITING" });
   };
 
-  if (online && !waiting) return null;
+  const install = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
+
+  if (online && !waiting && !installPrompt) return null;
   return (
     <aside className="pwa-status" aria-live="polite">
       {!online && <span>当前离线 · 训练与本地记录仍可使用</span>}
+      {installPrompt && <span>可安装到此设备<button onClick={() => void install()}>安装应用</button></span>}
       {waiting && (
         <span>
           新版本已就绪

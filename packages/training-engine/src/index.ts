@@ -101,7 +101,9 @@ export function generateQuestions(
       characters.length > 1 && previousThree.length === 3 && previousThree.every((value) => value === previousThree[0])
         ? characters.filter((character) => character !== previousThree[0])
         : characters;
-    const target = candidates[Math.floor(random() * candidates.length)];
+    const target = definition.shuffle === false
+      ? characters[index % characters.length]
+      : candidates[Math.floor(random() * candidates.length)];
     const distractors = shuffle(
       choicePool.filter((character) => character !== target),
       random,
