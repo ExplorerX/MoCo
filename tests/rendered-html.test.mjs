@@ -32,6 +32,8 @@ test("server-renders onboarding and stable application routes", async () => {
   const learnHtml = await learn.text();
   assert.match(learnHtml, /按键练习/);
   assert.match(learnHtml, /按压时长/);
+  assert.match(learnHtml, /自动判定并清空/);
+  assert.doesNotMatch(learnHtml, />退格</);
 
   const practice = await render("/practice");
   assert.equal(practice.status, 200);

@@ -143,8 +143,7 @@ button { color: inherit; }
 .learn-code-input.progress { border-color: var(--accent); color: var(--accent); }
 .key-pad.learn-pad { min-height: 88px; }
 .learn-pads { gap: 7px; }
-.learn-keyer-actions { display: flex; justify-content: flex-end; gap: 16px; }
-.learn-keyer-actions .text-button:disabled { opacity: .4; cursor: not-allowed; }
+.learn-auto-note { color: var(--muted); font: 9px/1.5 var(--font-mono); text-align: center; }
 .duration-guide { padding: 13px 13px 11px; border: 1px solid var(--line); background: var(--bg); }
 .duration-readout { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 12px; font-size: 10px; color: var(--muted); }
 .duration-readout strong { color: var(--text); font: 12px var(--font-mono); }
