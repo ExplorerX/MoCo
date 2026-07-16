@@ -33,5 +33,7 @@ test("deletes old URLs and rejects unsupported V2 variants", () => {
   assert.equal(routeFromPath("/training/setup/unknown").view, "not-found");
   assert.equal(routeFromPath("/tools/chinese-telegraph").view, "not-found");
   assert.equal(routeFromPath("/settings/unknown").view, "not-found");
+  assert.equal(routeFromPath("/learn/character/AB").view, "not-found");
+  assert.equal(routeFromPath("/learn/character/%20").view, "not-found");
   assert.equal(routeFromPath("/missing").view, "not-found");
 });

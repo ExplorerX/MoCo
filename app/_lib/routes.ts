@@ -1,3 +1,5 @@
+import { MORSE } from "@learning-morse/morse-core";
+
 export type TrainingPresetId =
   | "learn.character.encode"
   | "learn.character.decode"
@@ -63,7 +65,7 @@ export function routeFromPath(pathname: string): AppRoute {
   if (path === "/learn" || path === "/learn/courses" || path === "/learn/characters") return { path, view: "learn" };
   if (path.startsWith("/learn/character/")) {
     const character = decodeSegment(path.slice("/learn/character/".length)).toUpperCase();
-    return character ? { path, view: "learn", character } : { path, view: "not-found" };
+    return character in MORSE ? { path, view: "learn", character } : { path, view: "not-found" };
   }
   if (path === "/receive") return { path, view: "receive" };
   if (path === "/send" || path === "/send/free") return { path, view: "send" };

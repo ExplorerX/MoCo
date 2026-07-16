@@ -21,7 +21,7 @@ import {
   submitTrainingAnswer,
   type TrainingState,
 } from "@learning-morse/training-engine";
-import { DATA_SCHEMA_VERSION, type AudioWaveform, type PracticeDefinition, type PracticeMode, type SessionSummary } from "@learning-morse/shared-types";
+import { DATA_SCHEMA_VERSION, type AudioWaveform, type PracticeDefinition, type PracticeMode, type SessionSummary, type TimingProfile } from "@learning-morse/shared-types";
 import type { SessionSnapshot } from "@learning-morse/shared-types";
 import type { CharacterStatRecord, LearningMorseExport } from "@learning-morse/storage";
 import PwaStatus from "./pwa-status";
@@ -52,12 +52,45 @@ type AppPreferences = {
 const MORSE: Readonly<Record<string, string>> = MORSE_TABLE;
 const DEFAULT_BINDINGS: KeyBindings = { single: "Space", dot: "KeyZ", dash: "KeyX", submit: "Enter", delete: "Backspace", replay: "KeyR", pause: "KeyP" };
 
-const NAV: { id: PrimaryView; label: string; mark: string }[] = [
-  { id: "home", label: "首页", mark: "01" },
-  { id: "learn", label: "基础", mark: "02" },
-  { id: "receive", label: "听抄", mark: "03" },
-  { id: "send", label: "发报", mark: "04" },
-  { id: "tools", label: "工具", mark: "05" },
+function numberInRange(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
+}
+
+function sanitizePreferences(value: unknown): AppPreferences {
+  const saved = value && typeof value === "object" ? value as Partial<AppPreferences> : {};
+  const wpm = Math.round(numberInRange(saved.wpm, 20, 8, 40));
+  const bindings = { ...DEFAULT_BINDINGS };
+  if (saved.bindings && typeof saved.bindings === "object") {
+    for (const control of Object.keys(DEFAULT_BINDINGS) as (keyof KeyBindings)[]) {
+      const binding = saved.bindings[control];
+      if (typeof binding === "string" && binding.trim()) bindings[control] = binding;
+    }
+  }
+  return {
+    frequency: Math.round(numberInRange(saved.frequency, 600, 400, 900)),
+    wpm,
+    effectiveWpm: Math.min(wpm, Math.round(numberInRange(saved.effectiveWpm, 10, 5, 40))),
+    volume: numberInRange(saved.volume, 0.6, 0.1, 1),
+    waveform: saved.waveform === "square" ? "square" : "sine",
+    keyMode: saved.keyMode === "dual" ? "dual" : "single",
+    thresholdUnits: numberInRange(saved.thresholdUnits, 2, 1.4, 2.6),
+    commitGapUnits: numberInRange(saved.commitGapUnits, 6, 3, 10),
+    questionCount: Math.round(numberInRange(saved.questionCount, 4, 4, 40)),
+    practiceCharacters: typeof saved.practiceCharacters === "string" ? saved.practiceCharacters : "K M R S",
+    shuffle: typeof saved.shuffle === "boolean" ? saved.shuffle : true,
+    timeoutMs: typeof saved.timeoutMs === "number" && Number.isFinite(saved.timeoutMs) && saved.timeoutMs > 0 ? saved.timeoutMs : null,
+    bindings,
+  };
+}
+
+const NAV: { id: PrimaryView; label: string }[] = [
+  { id: "home", label: "首页" },
+  { id: "learn", label: "基础" },
+  { id: "receive", label: "听抄" },
+  { id: "send", label: "发报" },
+  { id: "tools", label: "工具" },
 ];
 
 const DOMAIN_CARDS = [
@@ -222,6 +255,9 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const pressStartedAtRef = useRef<number | null>(null);
   const learnEvaluationTimerRef = useRef<number | null>(null);
   const learnResultTimerRef = useRef<number | null>(null);
+  const answerPendingRef = useRef(false);
+  const advancePendingRef = useRef(false);
+  const sessionStartPendingRef = useRef(false);
   const trainingStateRef = useRef<TrainingState | null>(null);
   const routeRef = useRef<AppRoute>(route);
   const activeInputTargetRef = useRef<"keyer" | "session" | "learn">("keyer");
@@ -240,7 +276,16 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const hasSessionAnswer = currentAttempt !== null;
   const activeCharacter = route.character && MORSE[route.character] ? route.character : learnFilter === "numbers" ? "0" : learnFilter === "punctuation" ? "." : "K";
   const sessionMode = trainingState?.snapshot.definition.mode ?? "sound-to-character";
+  const sessionTiming = trainingState?.snapshot.definition.timing;
+  const sessionDotMs = dotUnitMs(sessionTiming?.characterWpm ?? wpm);
+  const sessionThresholdMs = sessionDotMs * thresholdUnits;
   const freeKeyer = view === "send" && route.path === "/send/free";
+
+  const updateWpm = useCallback((nextWpm: number) => {
+    const safeWpm = Math.round(numberInRange(nextWpm, 20, 8, 40));
+    setWpm(safeWpm);
+    setEffectiveWpm((current) => Math.min(current, safeWpm));
+  }, []);
 
   const goTo = useCallback((path: string, replace = false) => {
     const nextRoute = routeFromPath(path);
@@ -264,7 +309,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         trainingStateRef.current = interrupted;
         setTrainingState(interrupted);
         setRecoverableState(interrupted);
-        void repositoryRef.current?.saveSession(interrupted.snapshot);
+        void repositoryRef.current?.saveSession(interrupted.snapshot).catch(() => setStorageState("error"));
       }
       setSessionCode("");
       setLearnCode("");
@@ -304,11 +349,14 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     sequenceRef.current = sequence;
   }, [sequence]);
 
-  const getInputEngine = useCallback(() => {
+  const getInputEngine = useCallback((target: "keyer" | "session" | "learn" = "keyer") => {
+    const characterWpm = target === "session"
+      ? trainingStateRef.current?.snapshot.definition.timing.characterWpm ?? wpm
+      : wpm;
     if (!inputEngineRef.current) {
-      inputEngineRef.current = new InputEngine({ characterWpm: wpm, thresholdUnits });
+      inputEngineRef.current = new InputEngine({ characterWpm, thresholdUnits });
     }
-    inputEngineRef.current.setConfig({ characterWpm: wpm, thresholdUnits });
+    inputEngineRef.current.setConfig({ characterWpm, thresholdUnits });
     return inputEngineRef.current;
   }, [thresholdUnits, wpm]);
 
@@ -327,9 +375,10 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     return audioEngineRef.current;
   }, [frequency, volume, waveform]);
 
-  const ensureAudio = useCallback(async () => {
+  const ensureAudio = useCallback(async (timing?: TimingProfile) => {
     try {
       const engine = getAudioEngine();
+      if (timing) engine.setConfig({ frequencyHz: timing.frequencyHz, volume: timing.volume, waveform: timing.waveform });
       await engine.ensureRunning();
       setAudioState("ready");
       return engine;
@@ -339,18 +388,35 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     }
   }, [getAudioEngine]);
 
-  const playText = useCallback(async (text: string) => {
+  const playText = useCallback(async (text: string, timing?: TimingProfile) => {
     if (isPlaying) return;
-    const engine = await ensureAudio();
-    if (!engine) return;
+    try {
+      const engine = await ensureAudio(timing);
+      if (!engine) return;
+      const characterWpm = timing?.characterWpm ?? wpm;
+      const playbackEffectiveWpm = Math.min(timing?.effectiveWpm ?? effectiveWpm, characterWpm);
+      const timeline = createFarnsworthTimeline(text, characterWpm, playbackEffectiveWpm);
+      setIsPlaying(true);
+      const cursorMs = await engine.playTimeline(timeline);
 
-    setIsPlaying(true);
-    const timeline = createFarnsworthTimeline(text, wpm, effectiveWpm);
-    const cursorMs = await engine.playTimeline(timeline);
-
-    if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
-    playbackTimerRef.current = setTimeout(() => setIsPlaying(false), cursorMs + 100);
+      if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = setTimeout(() => {
+        playbackTimerRef.current = null;
+        setIsPlaying(false);
+      }, cursorMs + 100);
+    } catch {
+      setAudioState("error");
+      setIsPlaying(false);
+    }
   }, [effectiveWpm, ensureAudio, isPlaying, wpm]);
+
+  const copyText = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      // Clipboard access can be denied outside a secure or focused context.
+    }
+  }, []);
 
   const stopPlayback = useCallback(() => {
     audioEngineRef.current?.stopPlayback();
@@ -362,6 +428,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const clearCommitTimers = useCallback(() => {
     if (charTimerRef.current) clearTimeout(charTimerRef.current);
     if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
+    charTimerRef.current = null;
+    wordTimerRef.current = null;
   }, []);
 
   const stopPressMeter = useCallback((finalDuration = 0) => {
@@ -391,28 +459,52 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     stopPressMeter(duration);
   }, [stopPressMeter]);
 
-  const commitSequence = useCallback(() => {
+  const commitSequence = useCallback((appendWordGap = false) => {
     const current = sequenceRef.current;
-    if (!current) return;
-    const character = REVERSE_MORSE[current] ?? "?";
-    setDecoded((value) => `${value}${character}`);
+    const character = current ? REVERSE_MORSE[current] ?? "?" : "";
     sequenceRef.current = "";
     setSequence("");
+    setDecoded((value) => {
+      const committed = `${value}${character}`;
+      return appendWordGap && committed && !committed.endsWith(" ") ? `${committed} ` : committed;
+    });
   }, []);
 
-  const appendSymbol = useCallback((symbol: "." | "-") => {
+  const scheduleCommitTimers = useCallback(() => {
     clearCommitTimers();
-    setSequence((value) => {
-      const next = `${value}${symbol}`.slice(-6);
-      sequenceRef.current = next;
-      return next;
-    });
-    charTimerRef.current = setTimeout(commitSequence, characterGapMs);
-    wordTimerRef.current = setTimeout(() => {
+    charTimerRef.current = setTimeout(() => {
+      charTimerRef.current = null;
       commitSequence();
-      setDecoded((value) => value.endsWith(" ") || value.length === 0 ? value : `${value} `);
+    }, characterGapMs);
+    wordTimerRef.current = setTimeout(() => {
+      wordTimerRef.current = null;
+      commitSequence(true);
     }, wordGapMs);
   }, [characterGapMs, clearCommitTimers, commitSequence, wordGapMs]);
+
+  const appendSymbol = useCallback((symbol: "." | "-") => {
+    const next = `${sequenceRef.current}${symbol}`.slice(-6);
+    sequenceRef.current = next;
+    setSequence(next);
+    scheduleCommitTimers();
+  }, [scheduleCommitTimers]);
+
+  const deleteOutput = useCallback(() => {
+    if (sequenceRef.current) {
+      const next = sequenceRef.current.slice(0, -1);
+      sequenceRef.current = next;
+      setSequence(next);
+      if (next) scheduleCommitTimers();
+      else clearCommitTimers();
+      return;
+    }
+    setDecoded((value) => value.slice(0, -1));
+  }, [clearCommitTimers, scheduleCommitTimers]);
+
+  const insertWordGap = useCallback(() => {
+    clearCommitTimers();
+    commitSequence(true);
+  }, [clearCommitTimers, commitSequence]);
 
   const appendSessionSymbol = useCallback((symbol: "." | "-") => {
     setSessionCode((value) => `${value}${symbol}`.slice(0, 6));
@@ -425,7 +517,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   }, []);
 
   const startLiveTone = useCallback(async (source: "keyboard" | "pointer", target: "keyer" | "session" | "learn" = "keyer") => {
-    const input = getInputEngine();
+    const input = getInputEngine(target);
     const signal = source === "keyboard"
       ? keyboardSignal("single", "down", performance.now())
       : pointerSignal("single", "down", performance.now());
@@ -434,7 +526,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     activeInputTargetRef.current = target;
     setIsPressing(true);
     if (target !== "keyer") startPressMeter();
-    const audio = await ensureAudio();
+    const timing = target === "session" ? trainingStateRef.current?.snapshot.definition.timing : undefined;
+    const audio = await ensureAudio(timing);
     if (!audio) {
       input.cancel(source, performance.now());
       setIsPressing(false);
@@ -447,7 +540,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   }, [ensureAudio, getInputEngine, startPressMeter, stopPressMeter]);
 
   const stopLiveTone = useCallback((source: "keyboard" | "pointer", cancel = false) => {
-    const input = getInputEngine();
+    const input = getInputEngine(activeInputTargetRef.current);
     const phase = cancel ? "cancel" : "up";
     const signal = source === "keyboard"
       ? keyboardSignal("single", phase, performance.now())
@@ -470,15 +563,16 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   }, [appendLearnSymbol, appendSessionSymbol, appendSymbol, getInputEngine, stopPressMeter]);
 
   const tapSymbol = useCallback(async (symbol: "." | "-", source: "keyboard" | "pointer", target: "keyer" | "session" | "learn" = "keyer", keepMeterLive = false) => {
-    const input = getInputEngine();
+    const input = getInputEngine(target);
     const control = symbol === "." ? "dot" : "dash";
     const signal = source === "keyboard"
       ? keyboardSignal(control, "down", performance.now())
       : pointerSignal(control, "down", performance.now());
     const interpretation = input.consume(signal);
     if (interpretation.kind !== "symbol") return;
-    const audio = await ensureAudio();
-    if (audio) void audio.playTone(interpretation.durationMs);
+    const timing = target === "session" ? trainingStateRef.current?.snapshot.definition.timing : undefined;
+    const audio = await ensureAudio(timing);
+    if (audio) void audio.playTone(interpretation.durationMs).catch(() => setAudioState("error"));
     if (target !== "keyer" && !keepMeterLive) stopPressMeter(interpretation.durationMs);
     if (target === "session") appendSessionSymbol(interpretation.symbol);
     else if (target === "learn") appendLearnSymbol(interpretation.symbol);
@@ -502,7 +596,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const sessionKeying = view === "session" && sessionMode === "character-to-keying";
+      const sessionKeying = view === "session" && sessionMode === "character-to-keying" && trainingState?.snapshot.status === "answering";
       const learningKeyer = view === "learn";
       if ((!freeKeyer && !sessionKeying && !learningKeyer) || isEditableTarget(event.target) || event.repeat) return;
       const target = sessionKeying ? "session" : learningKeyer ? "learn" : "keyer";
@@ -522,7 +616,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       }
       if (freeKeyer && event.code === bindings.delete) {
         event.preventDefault();
-        setSequence((value) => value.slice(0, -1));
+        deleteOutput();
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -541,17 +635,20 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       if (keyMode === "dual" && (view === "learn" || (view === "session" && sessionMode === "character-to-keying"))) finishDirectSymbol();
       else stopLiveTone("keyboard", true);
     };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") release();
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", release);
-    document.addEventListener("visibilitychange", release);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", release);
-      document.removeEventListener("visibilitychange", release);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [bindings, finishDirectSymbol, freeKeyer, keyMode, sessionMode, startDirectSymbol, startLiveTone, stopLiveTone, tapSymbol, view]);
+  }, [bindings, deleteOutput, finishDirectSymbol, freeKeyer, keyMode, sessionMode, startDirectSymbol, startLiveTone, stopLiveTone, tapSymbol, trainingState?.snapshot.status, view]);
 
   useEffect(() => {
     if (view !== "learn" || !learnCode || isPressing) return;
@@ -590,7 +687,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         repository.getCharacterStats(),
         repository.getRecentSessions(50),
         repository.getLatestCompletedSession(),
-        repository.getSetting<AppPreferences>("preferences"),
+        repository.getSetting<unknown>("preferences"),
       ]))
       .then(([stored, stats, sessions, latest, saved]) => {
         if (cancelled) return;
@@ -599,19 +696,20 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         setCharacterStats(stats);
         setRecentSessions(sessions);
         if (saved) {
-          setFrequency(saved.frequency ?? 600);
-          setWpm(saved.wpm ?? 20);
-          setEffectiveWpm(saved.effectiveWpm ?? 10);
-          setVolume(saved.volume ?? 0.6);
-          setWaveform(saved.waveform ?? "sine");
-          setKeyMode(saved.keyMode ?? "single");
-          setThresholdUnits(saved.thresholdUnits ?? 2);
-          setCommitGapUnits(saved.commitGapUnits ?? 6);
-          setQuestionCount(saved.questionCount ?? 4);
-          setPracticeCharacters(saved.practiceCharacters ?? "K M R S");
-          setShuffleQuestions(saved.shuffle ?? true);
-          setTimeoutMs(saved.timeoutMs ?? null);
-          setBindings({ ...DEFAULT_BINDINGS, ...(saved.bindings ?? {}) });
+          const preferences = sanitizePreferences(saved);
+          setFrequency(preferences.frequency);
+          setWpm(preferences.wpm);
+          setEffectiveWpm(preferences.effectiveWpm);
+          setVolume(preferences.volume);
+          setWaveform(preferences.waveform);
+          setKeyMode(preferences.keyMode);
+          setThresholdUnits(preferences.thresholdUnits);
+          setCommitGapUnits(preferences.commitGapUnits);
+          setQuestionCount(preferences.questionCount);
+          setPracticeCharacters(preferences.practiceCharacters);
+          setShuffleQuestions(preferences.shuffle);
+          setTimeoutMs(preferences.timeoutMs);
+          setBindings(preferences.bindings);
         }
         setPreferencesLoaded(true);
         setStorageState("ready");
@@ -659,7 +757,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
         if (restored.snapshot.status === "interrupted") restored = resumeTraining(restored, now);
         if (restored.snapshot.status === "prompting") restored = markPromptComplete(restored, now);
         if (restored.snapshot.updatedAt !== stored.snapshot.updatedAt || restored.snapshot.status !== stored.snapshot.status) {
-          void getRepository().then((repository) => repository.saveSession(restored.snapshot));
+          void getRepository().then((repository) => repository.saveSession(restored.snapshot)).catch(() => setStorageState("error"));
         }
       }
       setTrainingState(restored);
@@ -694,7 +792,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       const interrupted = interruptTraining(trainingState, new Date().toISOString());
       setTrainingState(interrupted);
       setRecoverableState(interrupted);
-      void getRepository().then((repository) => repository.saveSession(interrupted.snapshot));
+      void getRepository().then((repository) => repository.saveSession(interrupted.snapshot)).catch(() => setStorageState("error"));
     } else if (
       view === "session" &&
       trainingState &&
@@ -706,6 +804,8 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   };
 
   const startSession = async (presetId: TrainingPresetId = "receive.character.audio", characterOverride?: string[], guidedLessonId?: string) => {
+    if (sessionStartPendingRef.current) return;
+    sessionStartPendingRef.current = true;
     try {
       const now = new Date().toISOString();
       const sessionId = crypto.randomUUID();
@@ -765,11 +865,15 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       goTo(`/training/session/${encodeURIComponent(sessionId)}`);
     } catch {
       setStorageState("error");
+      setPracticeError("无法创建练习，请检查本地存储后重试。");
+    } finally {
+      sessionStartPendingRef.current = false;
     }
   };
 
   const resumeSavedSession = async () => {
-    if (!recoverableState) return;
+    if (!recoverableState || sessionStartPendingRef.current) return;
+    sessionStartPendingRef.current = true;
     try {
       const now = new Date().toISOString();
       let next = recoverableState;
@@ -783,30 +887,40 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       goTo(`/training/session/${encodeURIComponent(next.snapshot.id)}`);
     } catch {
       setStorageState("error");
+    } finally {
+      sessionStartPendingRef.current = false;
     }
   };
 
   const answerQuestion = async (answer: string, timingScore: number | null = null) => {
-    if (!trainingState || trainingState.snapshot.status !== "answering") return;
+    const active = trainingStateRef.current;
+    if (!active || active.snapshot.status !== "answering" || answerPendingRef.current) return;
+    answerPendingRef.current = true;
     try {
-      const result = submitTrainingAnswer(trainingState, answer, new Date().toISOString(), timingScore);
+      const result = submitTrainingAnswer(active, answer, new Date().toISOString(), timingScore);
       await (await getRepository()).saveAttemptAndSession(result.attempt, result.state.snapshot);
+      trainingStateRef.current = result.state;
       setTrainingState(result.state);
     } catch {
       setStorageState("error");
+    } finally {
+      answerPendingRef.current = false;
     }
   };
 
   const nextQuestion = async () => {
-    if (!trainingState || trainingState.snapshot.status !== "feedback") return;
+    const active = trainingStateRef.current;
+    if (!active || active.snapshot.status !== "feedback" || advancePendingRef.current) return;
+    advancePendingRef.current = true;
     try {
       const now = new Date().toISOString();
-      let next = advanceTraining(trainingState, now);
+      let next = advanceTraining(active, now);
       if (next.snapshot.status === "completed") {
         await (await getRepository()).saveSession(next.snapshot);
         setLastSummary(next.snapshot.summary);
         setLatestResultState(next);
         setRecoverableState(null);
+        trainingStateRef.current = next;
         setTrainingState(next);
         const repository = await getRepository();
         const [stats, sessions] = await Promise.all([repository.getCharacterStats(), repository.getRecentSessions(7)]);
@@ -817,12 +931,15 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       }
       next = markPromptComplete(next, now);
       await (await getRepository()).saveSession(next.snapshot);
+      trainingStateRef.current = next;
       setTrainingState(next);
       setSessionCode("");
       setPressElapsedMs(0);
       setTypedAnswer("");
     } catch {
       setStorageState("error");
+    } finally {
+      advancePendingRef.current = false;
     }
   };
 
@@ -852,10 +969,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
     let next = trainingState;
     if (next.snapshot.status === "prompting" || next.snapshot.status === "answering") {
       next = recordReplay(next, new Date().toISOString());
+      trainingStateRef.current = next;
       setTrainingState(next);
-      void getRepository().then((repository) => repository.saveSession(next.snapshot));
+      void getRepository().then((repository) => repository.saveSession(next.snapshot)).catch(() => setStorageState("error"));
     }
-    if (sessionMode === "sound-to-character") await playText(currentQuestion.target);
+    if (sessionMode === "sound-to-character") await playText(currentQuestion.target, next.snapshot.definition.timing);
   };
 
   const submitKeyingAnswer = async () => {
@@ -869,22 +987,26 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
 
   const leaveSession = async (saveForLater: boolean) => {
     if (!trainingState) return;
-    stopPlayback();
-    stopLiveTone("pointer", true);
-    let next = trainingState;
-    const now = new Date().toISOString();
-    if (saveForLater) {
-      if (next.snapshot.status === "prompting" || next.snapshot.status === "answering") next = interruptTraining(next, now);
-      setRecoverableState(next);
-    } else if (!saveForLater && !["completed", "abandoned"].includes(next.snapshot.status)) {
-      next = abandonTraining(next, now);
-      setRecoverableState(null);
+    try {
+      stopPlayback();
+      stopLiveTone("pointer", true);
+      let next = trainingState;
+      const now = new Date().toISOString();
+      if (saveForLater) {
+        if (next.snapshot.status === "prompting" || next.snapshot.status === "answering") next = interruptTraining(next, now);
+        setRecoverableState(next);
+      } else if (!saveForLater && !["completed", "abandoned"].includes(next.snapshot.status)) {
+        next = abandonTraining(next, now);
+        setRecoverableState(null);
+      }
+      await (await getRepository()).saveSession(next.snapshot);
+      trainingStateRef.current = next;
+      setTrainingState(next);
+      setShowExitConfirm(false);
+      goTo(domainPathForMode(next.snapshot.definition.mode));
+    } catch {
+      setStorageState("error");
     }
-    await (await getRepository()).saveSession(next.snapshot);
-    trainingStateRef.current = next;
-    setTrainingState(next);
-    setShowExitConfirm(false);
-    goTo(domainPathForMode(next.snapshot.definition.mode));
   };
 
   const exportLearningData = async () => {
@@ -896,7 +1018,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
       anchor.href = url;
       anchor.download = `morse-learning-${new Date().toISOString().slice(0, 10)}.json`;
       anchor.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
       setDataMessage("数据已导出。");
     } catch {
       setDataMessage("导出失败，请稍后重试。");
@@ -905,6 +1027,10 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
 
   const importLearningData = async (file: File) => {
     try {
+      if (file.size > 20 * 1024 * 1024) {
+        setDataMessage("无法导入：文件超过 20 MB 限制。");
+        return;
+      }
       setPreferencesLoaded(false);
       const payload = JSON.parse(await file.text()) as LearningMorseExport;
       await (await getRepository()).importData(payload);
@@ -918,12 +1044,17 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
 
   const clearLearningData = async () => {
     if (!window.confirm("确定清空本机的练习记录、统计和设置吗？此操作无法撤销。")) return;
-    setPreferencesLoaded(false);
-    await (await getRepository()).clearAll();
-    window.localStorage.removeItem("morse-v2-onboarding-complete");
-    window.localStorage.removeItem("morse-v2-theme");
-    setDataMessage("本地数据已清空，页面将重新载入。");
-    window.setTimeout(() => window.location.reload(), 500);
+    try {
+      setPreferencesLoaded(false);
+      await (await getRepository()).clearAll();
+      window.localStorage.removeItem("morse-v2-onboarding-complete");
+      window.localStorage.removeItem("morse-v2-theme");
+      setDataMessage("本地数据已清空，页面将重新载入。");
+      window.setTimeout(() => window.location.reload(), 500);
+    } catch {
+      setPreferencesLoaded(true);
+      setDataMessage("清空失败，请稍后重试。");
+    }
   };
 
   useEffect(() => {
@@ -986,7 +1117,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
   const latestDurationMs = latestState?.snapshot.completedAt
     ? Date.parse(latestState.snapshot.completedAt) - Date.parse(latestState.snapshot.startedAt)
     : 0;
-  const trend = completedSessions.slice().reverse().map((session) => Math.round((session.summary?.accuracy ?? 0) * 100));
+  const trend = completedSessions.slice(0, 12).reverse().map((session) => Math.round((session.summary?.accuracy ?? 0) * 100));
   const aggregatedCharacterStats = useMemo(() => {
     const totals = new Map<string, CharacterStatRecord>();
     for (const stat of characterStats) {
@@ -1075,18 +1206,18 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               className={activePrimaryView === item.id ? "nav-item active" : "nav-item"}
               onClick={() => navigate(item.id)}
             >
-              <span>{item.mark}</span>{item.label}
+              {item.label}
             </button>
           ))}
         </nav>
         <div className="rail-footer">
           <button className={view === "progress" ? "nav-item active" : "nav-item"} onClick={() => navigate("progress")}>
-            <span>06</span>进度
+            进度
           </button>
           <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => navigate("settings")}>
-            <span>07</span>设置
+            设置
           </button>
-          <p>V2 FOUNDATION · 0.4.0</p>
+          <p>V2 FOUNDATION · 0.4.2</p>
         </div>
       </aside>}
 
@@ -1256,7 +1387,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               <div><p className="section-label">SESSION SETUP · {route.presetId}</p><h2>自定义本轮训练</h2><p>本轮参数会写入 V2 会话快照；旧版设置与会话不会载入。</p></div>
               <label><span>练习字符</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} placeholder="K M R S" /></label>
               <label><span>题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label>
-              <label><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => setWpm(Number(event.target.value))} /></label>
+              <label><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => updateWpm(Number(event.target.value))} /></label>
               <label><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label>
               <label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label>
               <label><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label>
@@ -1285,11 +1416,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               </>}
               {activeGuidedLesson && !hasSessionAnswer && <div className="guided-session-cues">
                 <div className="guided-session-cue-heading"><span>第 {GUIDED_LESSONS.findIndex((lesson) => lesson.id === activeGuidedLesson.id) + 1} 课 · {activeGuidedLesson.title}</span><button className="text-button" onClick={() => setShowGuidedHints((value) => !value)}>{showGuidedHints ? "隐藏提示" : "显示提示"}</button></div>
-                {showGuidedHints && <div className="guided-cue-grid">{activeGuidedLesson.characters.map((character, index) => <button key={character} className={character === currentQuestion.target ? "current" : ""} onClick={() => void playText(character)}><strong>{character}</strong><span>{formatCode(MORSE[character])}</span><small>{activeGuidedLesson.cues[index]}</small></button>)}</div>}
-                <button className="secondary small" onClick={() => void playText(currentQuestion.target)}>听一遍当前节奏</button>
+                 {showGuidedHints && <div className="guided-cue-grid">{activeGuidedLesson.characters.map((character, index) => <button key={character} className={character === currentQuestion.target ? "current" : ""} onClick={() => void playText(character, sessionTiming)}><strong>{character}</strong><span>{formatCode(MORSE[character])}</span><small>{activeGuidedLesson.cues[index]}</small></button>)}</div>}
+                 <button className="secondary small" onClick={() => void playText(currentQuestion.target, sessionTiming)}>听一遍当前节奏</button>
               </div>}
               <h2>{trainingState?.snapshot.status === "paused" ? "练习已暂停" : hasSessionAnswer ? "已提交答案" : sessionMode === "sound-to-character" ? "听声音，选择对应字符" : sessionMode === "code-to-character" ? "这个点划组合对应哪个字符？" : sessionMode === "character-to-code" ? "选择正确的 Morse Code" : activeGuidedLesson ? "跟随提示，发出这个字符" : "用真实按键发出这个字符"}</h2>
-              <p>Character {wpm} WPM · Effective {effectiveWpm} WPM</p>
+              <p>Character {sessionTiming?.characterWpm ?? wpm} WPM · Effective {sessionTiming?.effectiveWpm ?? effectiveWpm} WPM</p>
             </div>
             {(sessionMode === "sound-to-character" || sessionMode === "code-to-character") && !hasSessionAnswer && <form className="typed-answer" onSubmit={(event) => { event.preventDefault(); if (typedAnswer.trim()) void answerQuestion(typedAnswer); }}><label><span>输入字符</span><input value={typedAnswer} maxLength={1} autoCapitalize="characters" autoComplete="off" onChange={(event) => setTypedAnswer(event.target.value.toUpperCase())} disabled={trainingState?.snapshot.status !== "answering"} /></label><button className="secondary" type="submit" disabled={!typedAnswer.trim() || trainingState?.snapshot.status !== "answering"}>提交</button></form>}
             {sessionMode !== "character-to-keying" && <div className="answer-grid">
@@ -1300,11 +1431,11 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
             </div>}
             {sessionMode === "character-to-keying" && !hasSessionAnswer && <div className="session-keyer">
               <div className="keying-code" aria-live="polite">{sessionCode ? formatCode(sessionCode) : "等待输入…"}</div>
-              <KeyDurationGuide ref={durationGuideRef} elapsedMs={pressElapsedMs} thresholdMs={thresholdMs} dotMs={dotMs} pressing={isPressing} />
-              {keyMode === "single" ? <button className={isPressing ? "key-pad compact pressing" : "key-pad compact"} disabled={trainingState?.snapshot.status !== "answering"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); void startLiveTone("pointer", "session"); }} onPointerUp={() => stopLiveTone("pointer")} onPointerCancel={() => stopLiveTone("pointer", true)}><span>按住发报</span><small>{bindings.single} · 短按点，长按划</small></button> : <div className="dual-pads"><button className="key-pad compact" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol(".", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol(".", "pointer", "session"); }}><span>点 ·</span><small>{bindings.dot}</small></button><button className="key-pad compact" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol("-", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol("-", "pointer", "session"); }}><span>划 —</span><small>{bindings.dash}</small></button></div>}
+              <KeyDurationGuide ref={durationGuideRef} elapsedMs={pressElapsedMs} thresholdMs={sessionThresholdMs} dotMs={sessionDotMs} pressing={isPressing} />
+              {keyMode === "single" ? <button className={isPressing ? "key-pad compact pressing" : "key-pad compact"} disabled={trainingState?.snapshot.status !== "answering"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); void startLiveTone("pointer", "session"); }} onPointerUp={() => stopLiveTone("pointer")} onPointerCancel={() => stopLiveTone("pointer", true)}><span>按住发报</span><small>{bindings.single} · 短按点，长按划</small></button> : <div className="dual-pads"><button className="key-pad compact" disabled={trainingState?.snapshot.status !== "answering"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol(".", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol(".", "pointer", "session"); }}><span>点 ·</span><small>{bindings.dot}</small></button><button className="key-pad compact" disabled={trainingState?.snapshot.status !== "answering"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); startDirectSymbol("-", "pointer", "session"); }} onPointerUp={finishDirectSymbol} onPointerCancel={finishDirectSymbol} onClick={(event) => { if (event.detail === 0) void tapSymbol("-", "pointer", "session"); }}><span>划 —</span><small>{bindings.dash}</small></button></div>}
               <div className="button-row"><button className="secondary" onClick={() => setSessionCode((value) => value.slice(0, -1))} disabled={!sessionCode}>删除一划</button><button className="primary" onClick={() => void submitKeyingAnswer()} disabled={!sessionCode}>提交发报</button></div>
             </div>}
-            {hasSessionAnswer && <div className={sessionAnswer === currentQuestion.target ? "feedback success" : "feedback error"}><span>{sessionAnswer === currentQuestion.target ? "正确 · 已保存" : `${sessionAnswer ? `你的答案：${sessionAnswer}` : "已超时"} · 已保存`}</span><strong>{formatCode(MORSE[currentQuestion.target])}</strong><button className="secondary small" onClick={() => void playText(currentQuestion.target)}>播放正确节奏</button><button className="primary" onClick={() => void nextQuestion()}>{sessionStep === questions.length - 1 ? "查看结果" : "下一题"}</button></div>}
+            {hasSessionAnswer && <div className={sessionAnswer === currentQuestion.target ? "feedback success" : "feedback error"}><span>{sessionAnswer === currentQuestion.target ? "正确 · 已保存" : `${sessionAnswer ? `你的答案：${sessionAnswer}` : "已超时"} · 已保存`}</span><strong>{formatCode(MORSE[currentQuestion.target])}</strong><button className="secondary small" onClick={() => void playText(currentQuestion.target, sessionTiming)}>播放正确节奏</button><button className="primary" onClick={() => void nextQuestion()}>{sessionStep === questions.length - 1 ? "查看结果" : "下一题"}</button></div>}
             {showExitConfirm && <div className="dialog-backdrop" role="presentation"><section className="confirm-dialog card" role="dialog" aria-modal="true" aria-labelledby="leave-title"><p className="section-label">LEAVE SESSION</p><h2 id="leave-title">要如何处理这轮练习？</h2><p>保存后可从练习中心继续；结束练习会保留已提交记录，但本轮不计入完成统计。</p><div className="button-row"><button className="text-button" onClick={() => setShowExitConfirm(false)}>继续练习</button><button className="secondary" onClick={() => void leaveSession(true)}>保存后离开</button><button className="primary danger-action" onClick={() => void leaveSession(false)}>结束练习</button></div></section></div>}
           </section>
         )}
@@ -1332,7 +1463,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               <div className="decoded-output">
                 <span className="section-label">DECODED OUTPUT</span>
                 <p>{decoded || <em>开始按键，识别结果会出现在这里</em>}<b>{formatCode(sequence)}</b></p>
-                <div className="output-actions"><button onClick={() => setDecoded((value) => value.slice(0, -1))}>退格</button><button onClick={() => setDecoded((value) => value.endsWith(" ") || !value ? value : `${value} `)}>空格</button><button onClick={() => { setDecoded(""); setSequence(""); sequenceRef.current = ""; clearCommitTimers(); }}>清空</button><button onClick={() => void playText(decoded)} disabled={!decoded}>重新播放</button><button onClick={() => navigator.clipboard?.writeText(decoded)}>复制</button></div>
+                <div className="output-actions"><button onClick={deleteOutput}>退格</button><button onClick={insertWordGap}>空格</button><button onClick={() => { setDecoded(""); setSequence(""); sequenceRef.current = ""; clearCommitTimers(); }}>清空</button><button onClick={() => void playText(decoded)} disabled={!decoded}>重新播放</button><button onClick={() => void copyText(decoded)} disabled={!decoded}>复制</button></div>
               </div>
 
               <div className="signal-monitor">
@@ -1365,7 +1496,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
             <aside className="lab-controls">
               <div className="card control-card">
                 <p className="section-label">LIVE PARAMETERS</p>
-                <label><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => setWpm(Number(event.target.value))} /></label>
+                <label><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => updateWpm(Number(event.target.value))} /></label>
                 <label><span>点划阈值 <b>{thresholdUnits.toFixed(1)} units</b></span><input type="range" min="1.4" max="2.6" step="0.1" value={thresholdUnits} onChange={(event) => setThresholdUnits(Number(event.target.value))} /></label>
                 <label><span>自动提交等待 <b>{commitGapUnits.toFixed(1)} units · {Math.round(characterGapMs)} ms</b></span><input aria-label="自动提交等待" type="range" min="3" max="10" step="0.5" value={commitGapUnits} onChange={(event) => setCommitGapUnits(Number(event.target.value))} /></label>
                 <label><span>音调 <b>{frequency} Hz</b></span><input type="range" min="400" max="900" step="25" value={frequency} onChange={(event) => setFrequency(Number(event.target.value))} /></label>
@@ -1387,9 +1518,9 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               <div className="section-heading compact"><div><p className="section-label">MORSE CONVERTER</p><h2>文本与国际 Morse Code 双向转换</h2></div><button className="secondary small" onClick={() => void playText(toolText)} disabled={!toolText.trim()}>播放文本</button></div>
               <div className="tool-layout">
                 <label><span>文本</span><textarea value={toolText} onChange={(event) => setToolText(event.target.value)} placeholder="输入英文、数字或受支持标点" /><small>自动转为大写；不支持的字符显示为 ?</small></label>
-                <div className="conversion-output"><span>转换结果</span><strong>{toolEncoded ? formatCode(toolEncoded) : "等待文本…"}</strong><div className="button-row"><button className="secondary small" onClick={() => { setToolCode(toolEncoded); void navigator.clipboard?.writeText(toolEncoded); }} disabled={!toolEncoded}>复制并送入解码</button></div></div>
+                <div className="conversion-output"><span>转换结果</span><strong>{toolEncoded ? formatCode(toolEncoded) : "等待文本…"}</strong><div className="button-row"><button className="secondary small" onClick={() => { setToolCode(toolEncoded); void copyText(toolEncoded); }} disabled={!toolEncoded}>复制并送入解码</button></div></div>
                 <label><span>Morse Code</span><textarea value={toolCode} onChange={(event) => setToolCode(event.target.value)} placeholder="... --- ... / .-" /><small>字符之间用空格，单词之间用 /</small></label>
-                <div className="conversion-output"><span>解码结果</span><strong>{toolDecoded || "等待电码…"}</strong><div className="button-row"><button className="secondary small" onClick={() => { setToolText(toolDecoded); void navigator.clipboard?.writeText(toolDecoded); }} disabled={!toolDecoded}>复制并送入编码</button></div></div>
+                <div className="conversion-output"><span>解码结果</span><strong>{toolDecoded || "等待电码…"}</strong><div className="button-row"><button className="secondary small" onClick={() => { setToolText(toolDecoded); void copyText(toolDecoded); }} disabled={!toolDecoded}>复制并送入编码</button></div></div>
               </div>
             </section>}
             {route.path !== "/tools/morse" && <section className="card reference-panel"><div className="section-heading compact"><div><p className="section-label">INTERNATIONAL MORSE</p><h2>字符速查表</h2></div><span className="count">{Object.keys(MORSE).length} 个字符</span></div><div className="reference-grid">{Object.entries(MORSE).map(([character, code]) => <button key={character} onClick={() => void playText(character)} aria-label={`播放 ${character}`}><strong>{character}</strong><span>{formatCode(code)}</span></button>)}</div></section>}
@@ -1401,7 +1532,7 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
           <div className="page-stack">
             {routeMessage && <section className="route-error card"><h2>找不到这次练习</h2><p>{routeMessage}</p></section>}
             <nav className="stats-tabs" aria-label="进度视图"><button className={route.path === "/progress" || route.resultSessionId ? "active" : ""} onClick={() => goTo("/progress")}>概览</button><button className={route.path === "/progress/content" ? "active" : ""} onClick={() => goTo("/progress/content")}>字符</button><button className={route.path === "/progress/history" ? "active" : ""} onClick={() => goTo("/progress/history")}>历史</button></nav>
-            {route.path === "/progress/content" ? <section className="card stats-table"><div className="section-heading compact"><div><p className="section-label">CHARACTER PERFORMANCE</p><h2>字符表现</h2></div><span className="count">至少 3 次后参与薄弱项排序</span></div>{aggregatedCharacterStats.length ? aggregatedCharacterStats.sort((left, right) => left.character.localeCompare(right.character)).map((stat) => <button key={stat.character} onClick={() => goTo(`/learn/character/${encodeURIComponent(stat.character)}`)}><strong>{stat.character}</strong><span>{formatCode(MORSE[stat.character])}</span><span>{Math.round(stat.correct / stat.attempts * 100)}%</span><small>{stat.attempts} 次 · 平均 {(stat.totalReactionMs / stat.attempts / 1000).toFixed(1)}s</small></button>) : <p className="empty-copy">完成训练后，这里会显示每个字符的真实表现。</p>}</section>
+            {route.path === "/progress/content" ? <section className="card stats-table"><div className="section-heading compact"><div><p className="section-label">CHARACTER PERFORMANCE</p><h2>字符表现</h2></div><span className="count">至少 3 次后参与薄弱项排序</span></div>{aggregatedCharacterStats.length ? aggregatedCharacterStats.slice().sort((left, right) => left.character.localeCompare(right.character)).map((stat) => <button key={stat.character} onClick={() => goTo(`/learn/character/${encodeURIComponent(stat.character)}`)}><strong>{stat.character}</strong><span>{formatCode(MORSE[stat.character])}</span><span>{Math.round(stat.correct / stat.attempts * 100)}%</span><small>{stat.attempts} 次 · 平均 {(stat.totalReactionMs / stat.attempts / 1000).toFixed(1)}s</small></button>) : <p className="empty-copy">完成训练后，这里会显示每个字符的真实表现。</p>}</section>
             : route.path === "/progress/history" ? <section className="card history-list"><p className="section-label">SESSION HISTORY</p><h2>训练历史</h2>{completedSessions.length ? completedSessions.map((session) => <button key={session.id} onClick={() => goTo(`/training/result/${encodeURIComponent(session.id)}`)}><span><strong>{practiceModeLabel(session.definition.mode)}</strong><small>{new Date(session.completedAt ?? session.updatedAt).toLocaleString("zh-CN")}</small></span><b>{Math.round((session.summary?.accuracy ?? 0) * 100)}%</b><small>{session.summary?.correct}/{session.summary?.total}</small></button>) : <p className="empty-copy">还没有已完成的训练。</p>}</section>
             : <>
               {latestSummary ? <><section className="result-banner"><div><p className="section-label">LATEST SESSION</p><h2>{latestSummary.correct} / {latestSummary.total}</h2><span>本轮正确</span></div><div><strong>{Math.round(latestSummary.accuracy * 100)}%</strong><span>正确率</span></div><div><strong>{(latestSummary.averageReactionMs / 1000).toFixed(1)} s</strong><span>平均反应</span></div><div><strong>{formatDuration(latestDurationMs)}</strong><span>总用时</span></div><button className="primary" onClick={() => void startSession(latestMistakes.length ? "review.mistakes" : presetForPracticeMode(latestState?.snapshot.definition.mode))}>{latestMistakes.length ? `重练 ${latestMistakes.length} 个错题` : "再练一轮"}</button></section>{latestMistakes.length > 0 && <section className="card mistake-list"><p className="section-label">MISTAKES</p><h2>本轮错题</h2><div>{latestMistakes.map((attempt) => <button key={attempt.id} onClick={() => void playText(attempt.target)}><strong>{attempt.target}</strong><span>{formatCode(MORSE[attempt.target])}</span><small>你的答案：{attempt.response || "未识别"} · 播放</small></button>)}</div></section>}</> : <section className="empty-state card"><p className="section-label">NO SESSIONS YET</p><h2>完成第一轮训练后，这里会出现真实统计</h2><button className="primary" onClick={() => goTo("/receive")}>前往听抄训练</button></section>}
@@ -1418,15 +1549,15 @@ export default function MorseApp({ initialPath }: { initialPath: string }) {
               {settingsSection === "appearance" && <div className="theme-grid">{(["light", "dark", "amber", "contrast"] as Theme[]).map((item) => <button key={item} className={theme === item ? `theme-swatch ${item} active` : `theme-swatch ${item}`} onClick={() => setTheme(item)}><i /><span>{item === "light" ? "浅色" : item === "dark" ? "深色" : item === "amber" ? "无线电琥珀" : "高对比度"}</span></button>)}</div>}
               {settingsSection === "audio" && <><div className="segmented" aria-label="音色"><button className={waveform === "sine" ? "active" : ""} onClick={() => setWaveform("sine")}>正弦波</button><button className={waveform === "square" ? "active" : ""} onClick={() => setWaveform("square")}>方波</button></div><label className="setting-range"><span>默认音调 <b>{frequency} Hz</b></span><input type="range" min="400" max="900" step="25" value={frequency} onChange={(event) => setFrequency(Number(event.target.value))} /></label><label className="setting-range"><span>音量 <b>{Math.round(volume * 100)}%</b></span><input type="range" min="0.1" max="1" step="0.05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /></label><div className="button-row"><button className="secondary" onClick={() => void playText("TEST")}>播放测试音</button><button className="text-button" onClick={stopPlayback}>停止播放</button></div></>}
               {settingsSection === "input" && <><div className="segmented"><button className={keyMode === "single" ? "active" : ""} onClick={() => setKeyMode("single")}>单键时长</button><button className={keyMode === "dual" ? "active" : ""} onClick={() => setKeyMode("dual")}>点划双键</button></div><label className="setting-range"><span>自由发报自动提交等待 <b>{commitGapUnits.toFixed(1)} units · {Math.round(characterGapMs)} ms</b></span><input aria-label="自由发报自动提交等待" type="range" min="3" max="10" step="0.5" value={commitGapUnits} onChange={(event) => setCommitGapUnits(Number(event.target.value))} /></label><div className="binding-grid">{([['single','单键'],['dot','点'],['dash','划'],['submit','提交'],['delete','删除'],['replay','重播'],['pause','暂停']] as [keyof KeyBindings, string][]).map(([control, label]) => <label key={control}><span>{label}</span><input readOnly value={bindings[control]} onKeyDown={(event) => { event.preventDefault(); setBindings((value) => ({ ...value, [control]: event.code })); }} aria-label={`${label}按键，聚焦后按下新键`} /></label>)}</div>{new Set(Object.values(bindings)).size !== Object.values(bindings).length && <p className="inline-error" role="alert">检测到重复键位，请为每项操作设置不同按键。</p>}<div className="button-row"><button className="secondary" onClick={() => setBindings(DEFAULT_BINDINGS)}>恢复默认</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyF", dash: "KeyD" })}>左手预设</button><button className="secondary" onClick={() => setBindings({ ...DEFAULT_BINDINGS, single: "Space", dot: "KeyJ", dash: "KeyK" })}>右手预设</button><button className="text-button" onClick={() => goTo("/send/free")}>前往自由拍发</button></div></>}
-              {settingsSection === "training" && <><label className="setting-range"><span>默认题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label><label className="setting-range"><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => { const next = Number(event.target.value); setWpm(next); setEffectiveWpm((value) => Math.min(value, next)); }} /></label><label className="setting-range"><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label><label className="setting-text"><span>默认字符组</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} /></label><label className="setting-text"><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label></>}
+              {settingsSection === "training" && <><label className="setting-range"><span>默认题量 <b>{questionCount}</b></span><input type="range" min="4" max="40" step="4" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} /></label><label className="setting-range"><span>字符速度 <b>{wpm} WPM</b></span><input type="range" min="8" max="40" value={wpm} onChange={(event) => updateWpm(Number(event.target.value))} /></label><label className="setting-range"><span>有效速度 <b>{effectiveWpm} WPM</b></span><input type="range" min="5" max={wpm} value={Math.min(effectiveWpm, wpm)} onChange={(event) => setEffectiveWpm(Number(event.target.value))} /></label><label className="setting-text"><span>默认字符组</span><input value={practiceCharacters} onChange={(event) => setPracticeCharacters(event.target.value)} /></label><label className="setting-text"><span>每题超时</span><select value={timeoutMs ?? 0} onChange={(event) => setTimeoutMs(Number(event.target.value) || null)}><option value="0">关闭</option><option value="5000">5 秒</option><option value="10000">10 秒</option><option value="15000">15 秒</option></select></label><label className="checkbox-setting"><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /><span>随机打乱题目</span></label></>}
               {settingsSection === "data" && <><div className="setting-row"><span><strong>本地训练数据库</strong><small>逐题写入 IndexedDB，可在刷新后恢复</small></span><b>{storageState === "ready" ? "READY" : storageState === "error" ? "ERROR" : "LOADING"}</b></div><div className="setting-row"><span><strong>已记录字符</strong><small>仅统计真实作答</small></span><b>{aggregatedCharacterStats.length}</b></div><input ref={importInputRef} className="visually-hidden" type="file" accept="application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLearningData(file); event.target.value = ""; }} /><div className="button-row data-actions"><button className="secondary" onClick={() => void exportLearningData()}>导出 JSON</button><button className="secondary" onClick={() => importInputRef.current?.click()}>导入数据</button><button className="primary danger-action" onClick={() => void clearLearningData()}>清空本机数据</button></div>{dataMessage && <p className="status-message" role="status">{dataMessage}</p>}</>}
-              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>V2 Foundation · Web / PWA</small></span><b>0.4.0</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
+              {settingsSection === "about" && <><div className="setting-row"><span><strong>版本</strong><small>V2 Foundation · Web / PWA</small></span><b>0.4.2</b></div><div className="setting-row"><span><strong>运行方式</strong><small>浏览器、可安装 PWA，后续可封装原生壳</small></span><b>LOCAL FIRST</b></div><button className="secondary" onClick={() => { setOnboardingStep(0); goTo("/onboarding"); }}>重新查看新手引导</button></>}
             </section>
           </div>
         )}
       </main>
 
-      {view !== "session" && <nav className="bottom-nav" aria-label="移动端主导航">{NAV.map((item) => <button key={item.id} className={activePrimaryView === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.mark}</span>{item.label}</button>)}</nav>}
+      {view !== "session" && <nav className="bottom-nav" aria-label="移动端主导航">{NAV.map((item) => <button key={item.id} className={activePrimaryView === item.id ? "active" : ""} onClick={() => navigate(item.id)}>{item.label}</button>)}</nav>}
     </div>
   );
 }

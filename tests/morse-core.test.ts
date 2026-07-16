@@ -25,6 +25,11 @@ test("round-trips supported text", () => {
   assert.equal(decodeText(encodeText(source)), source);
 });
 
+test("decodes blank input as blank text", () => {
+  assert.equal(decodeText(""), "");
+  assert.equal(decodeText("   "), "");
+});
+
 test("normalizes visual dot and dash glyphs", () => {
   assert.equal(normalizeMorse(" ···   ——— "), "... ---");
 });

@@ -80,6 +80,52 @@ export interface SessionRepository {
   clearAll(): Promise<void>;
 }
 
+const EXPORT_TABLES = ["settings", "sessions", "attempts", "characterStats", "flags", "courseProgress"] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasString(record: Record<string, unknown>, key: string): boolean {
+  return typeof record[key] === "string" && record[key].length > 0;
+}
+
+function isValidExportRow(table: typeof EXPORT_TABLES[number], value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (table === "settings") return hasString(value, "scope") && hasString(value, "updatedAt");
+  if (table === "sessions") {
+    return hasString(value, "id") && hasString(value, "status") && isRecord(value.definition)
+      && Array.isArray(value.questions) && Number.isInteger(value.currentQuestionIndex);
+  }
+  if (table === "attempts") {
+    return hasString(value, "id") && hasString(value, "sessionId") && Number.isInteger(value.questionIndex)
+      && hasString(value, "target") && typeof value.response === "string" && typeof value.correct === "boolean";
+  }
+  if (table === "characterStats") {
+    return hasString(value, "id") && hasString(value, "character") && hasString(value, "mode")
+      && typeof value.attempts === "number" && typeof value.correct === "number" && typeof value.totalReactionMs === "number";
+  }
+  if (table === "flags") return hasString(value, "character") && typeof value.favorite === "boolean" && typeof value.needsWork === "boolean";
+  return hasString(value, "courseId") && Number.isInteger(value.step) && Array.isArray(value.unlockedCharacters);
+}
+
+export function validateLearningMorseExport(payload: unknown): asserts payload is LearningMorseExport {
+  if (!isRecord(payload) || payload.schemaVersion !== DATA_SCHEMA_VERSION || !isRecord(payload.tables)) {
+    throw new RangeError("Unsupported learning data export");
+  }
+  if (typeof payload.exportedAt !== "string" || !Number.isFinite(Date.parse(payload.exportedAt))) {
+    throw new RangeError("Learning data export timestamp is invalid");
+  }
+  for (const table of EXPORT_TABLES) {
+    if (!Array.isArray(payload.tables[table])) {
+      throw new RangeError(`Learning data export table is missing: ${table}`);
+    }
+    if (!payload.tables[table].every((row) => isValidExportRow(table, row))) {
+      throw new RangeError(`Learning data export table contains invalid rows: ${table}`);
+    }
+  }
+}
+
 export class LearningMorseDatabase extends Dexie {
   appMeta!: Table<AppMetaRecord, string>;
   settings!: Table<SettingsRecord, string>;
@@ -226,9 +272,7 @@ export class DexieSessionRepository implements SessionRepository {
   }
 
   async importData(payload: LearningMorseExport): Promise<void> {
-    if (payload?.schemaVersion !== DATA_SCHEMA_VERSION || !payload.tables) {
-      throw new RangeError("Unsupported learning data export");
-    }
+    validateLearningMorseExport(payload);
     await this.database.transaction(
       "rw",
       [

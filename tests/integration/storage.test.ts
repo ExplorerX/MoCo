@@ -121,6 +121,23 @@ test("persists preferences and round-trips a versioned local export", async () =
   await target.database.delete();
 });
 
+test("rejects incomplete imports without clearing existing data", async () => {
+  const repository = createSessionRepository(`morse-invalid-import-${crypto.randomUUID()}`);
+  await repository.initialize();
+  await repository.saveSetting("preferences", { waveform: "square" });
+  await assert.rejects(
+    repository.importData({
+      schemaVersion: DATA_SCHEMA_VERSION,
+      exportedAt: "2026-07-16T00:00:00.000Z",
+      tables: {},
+    } as never),
+    /table is missing/,
+  );
+  assert.deepEqual(await repository.getSetting("preferences"), { waveform: "square" });
+  repository.close();
+  await repository.database.delete();
+});
+
 test("finds the latest completed session that actually contains mistakes", async () => {
   const repository = createSessionRepository(`morse-mistakes-${crypto.randomUUID()}`);
   await repository.initialize();

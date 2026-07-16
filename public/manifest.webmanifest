@@ -17,7 +17,7 @@
     { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "开始练习", "url": "/practice", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "打开电键", "url": "/keyer", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "听抄练习", "url": "/receive", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "自由拍发", "url": "/send/free", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

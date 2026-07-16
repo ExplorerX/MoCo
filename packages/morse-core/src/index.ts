@@ -97,7 +97,9 @@ export function encodeText(text: string): string {
 }
 
 export function decodeText(code: string): string {
-  return normalizeMorse(code)
+  const normalized = normalizeMorse(code);
+  if (!normalized) return "";
+  return normalized
     .split(/\s*\/\s*/)
     .map((word) => word.split(/\s+/).map((token) => REVERSE_MORSE[token] ?? "?").join(""))
     .join(" ");

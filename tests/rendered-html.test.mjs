@@ -19,6 +19,7 @@ test("server-renders V2 navigation, domains and removed legacy routes", async ()
   const html = await response.text();
   assert.match(html, /<title>Morse Learning Lab<\/title>/i);
   assert.match(html, /点短，划长/);
+  assert.doesNotMatch(html, /<span>0[1-7]<\/span>(?:首页|基础|听抄|发报|工具|进度|设置)/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 
   const setup = await render("/training/setup/receive.character.audio");
