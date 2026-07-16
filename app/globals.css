@@ -364,6 +364,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 13px
 .onboarding .secondary { margin-top: 12px; }
 .onboarding-actions { margin-top: 28px; }
 
+.roadmap-strip, .reference-panel, .tool-panel { padding: clamp(22px, 4vw, 34px); }
+.roadmap-strip h2 { margin: 8px 0; }
+.roadmap-strip p:last-child { max-width: 780px; color: var(--muted); line-height: 1.7; }
+.tool-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin-top: 24px; }
+.tool-layout label, .conversion-output { min-height: 210px; border: 1px solid var(--line); background: var(--bg); padding: 18px; display: grid; align-content: start; gap: 10px; }
+.tool-layout label > span, .conversion-output > span { color: var(--muted); font: 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.tool-layout textarea { width: 100%; min-height: 118px; resize: vertical; border: 0; background: transparent; color: var(--text); padding: 0; font: 17px/1.7 var(--font-mono); outline: 0; }
+.tool-layout label small { color: var(--muted); line-height: 1.5; }
+.conversion-output { background: var(--surface-raised); }
+.conversion-output strong { color: var(--accent); font: 22px/1.7 var(--font-mono); overflow-wrap: anywhere; }
+.conversion-output .button-row { align-self: end; margin-top: auto; }
+.reference-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 7px; margin-top: 22px; }
+.reference-grid button { min-height: 68px; border: 1px solid var(--line); background: var(--bg); color: var(--text); display: grid; place-content: center; gap: 5px; cursor: pointer; }
+.reference-grid button:hover { border-color: var(--accent); }
+.reference-grid strong { font-size: 17px; }
+.reference-grid span { color: var(--accent); font: 10px var(--font-mono); }
+
 @media (max-width: 1050px) {
   .prototype { grid-template-columns: 86px minmax(0, 1fr); }
   .side-rail { padding-inline: 10px; }
@@ -377,6 +394,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 13px
   .lab-layout { grid-template-columns: 1fr; }
   .lab-controls { grid-template-columns: 1fr 1fr; }
   .setup-panel { grid-template-columns: 1fr 1fr; }
+  .reference-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -430,6 +448,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 13px
   .stats-table > button small { grid-column: 1 / -1; text-align: left; }
   .setup-panel { grid-template-columns: 1fr; }
   .setup-panel .button-row { grid-column: auto; }
+  .tool-layout { grid-template-columns: 1fr; }
+  .reference-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .pwa-status { justify-content: flex-start; }
   .bottom-nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; min-height: 66px; padding: 6px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: color-mix(in srgb, var(--surface) 94%, transparent); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(5, 1fr); backdrop-filter: blur(14px); }
   .bottom-nav button { border: 0; background: transparent; color: var(--muted); font-size: 10px; display: grid; place-content: center; gap: 4px; cursor: pointer; }
@@ -446,6 +466,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 13px
   .character-grid { grid-template-columns: repeat(3, 1fr); }
   .dual-pads { grid-template-columns: 1fr; }
   .dual-pads .key-pad { min-height: 150px; }
+  .reference-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

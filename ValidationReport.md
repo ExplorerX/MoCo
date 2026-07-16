@@ -6,10 +6,10 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 报告版本 | 0.5.5 |
-| 应用版本 | Stage C.1 0.3.6 |
+| 报告版本 | 0.6.0 |
+| 应用版本 | V2 Foundation 0.4.0 |
 | 验证日期 | 2026-07-16 |
-| 状态 | Stage C.1 自动验证与 Chromium 四模式核心流程完成；跨浏览器/真机验证待执行 |
+| 状态 | V2 断代重构自动验证通过；V2 跨浏览器/真机交互验证待执行 |
 | 已发布原型 | <https://learning-morse-code-lab.samaritanz.chatgpt.site> |
 
 ## 2. 本轮验证范围
@@ -30,8 +30,8 @@
 - 固定 seed 出题、状态机转换、暂停恢复和错题定义检查。
 - AudioEngine 单一基准调度与取消检查。
 - InputEngine 单键、双键和取消信号检查。
-- IndexedDB v1 schema、原子逐题写入、字符聚合和最近会话恢复检查。
-- 稳定路由解析、PWA Manifest、Service Worker 更新和回退策略检查。
+- V2 独立 IndexedDB 名称、data schema v2、原子逐题写入、字符聚合和最近会话恢复检查。
+- V2 稳定路由、旧 URL 删除、PWA Manifest、Service Worker 更新和回退策略检查。
 - 本地 Chromium 首次引导、自定义练习、逐题反馈、结果统计和深链接刷新恢复。
 - 本地 Chromium 学习页单键实时滑块、双键输入、进行中/正确反馈与自动清空操作。
 - 学习页与字符发报练习的按压时长/点划阈值指示，以及引导课程元数据保留检查。
@@ -44,7 +44,7 @@
 - Safari/Firefox/Android WebView 的前后台恢复。
 - Safari/Firefox 的安装提示与 PWA 离线重启。
 
-本轮真实浏览器验证使用本地 Chromium；未把该结果扩大描述为 Safari、Firefox 或物理设备通过。
+Stage C.1 曾完成本地 Chromium 交互验证；本轮 V2 重构只完成自动化和服务端直链渲染验证，未将旧版浏览器结果视为 V2 通过。
 
 ## 3. 自动验证结果
 
@@ -70,26 +70,24 @@
 | VR-A18 | 错题重练 | 通过 | 根据首次错误 attempt 生成确定性的重练定义 |
 | VR-A19 | AudioEngine 调度 | 通过 | 所有 ToneEvent 共用一个 AudioContext 基准并可统一取消 |
 | VR-A20 | InputEngine | 通过 | 单键点划、双键直接符号和 cancel 路径准确 |
-| VR-A21 | IndexedDB schema | 通过 | v1 建立 7 张约定表及版本元数据 |
+| VR-A21 | V2 IndexedDB schema | 通过 | 新数据库 `learning-morse-code-v2` 建立 7 张约定表，data schema 为 v2 |
 | VR-A22 | 逐题原子写入 | 通过 | attempt、session 和 character_stats 在同一事务更新 |
 | VR-A23 | 会话恢复 | 通过 | 可以选择最近更新的未完成会话及其 attempts |
-| VR-A24 | 稳定路由 | 通过 | 参数解析、无效路由和设置/训练深链接测试通过 |
+| VR-A24 | V2 稳定路由 | 通过 | 四大功能域、统一训练深链接、无效路由及旧 URL 删除测试通过 |
 | VR-A25 | PWA 基线 | 通过 | Manifest 安装字段、应用图标、导航回退和用户确认更新策略通过 |
 
 自动测试合计 29 项测试用例，29 项通过，0 项失败。构建、类型和静态检查均通过。
 
 ## 4. 流程结构检查
 
-### 4.1 首次/快速练习
+### 4.1 V2 导航与路由
 
-**状态：本地 Chromium 核心流程通过。**
+**状态：自动化与服务端直链渲染通过，V2 浏览器交互待回归。**
 
-- 首页主操作可进入 4 题实验。
-- 练习中心四种模式拥有独立题面和输入：声音播放、点划识别、字符编码选择和真实按键发报。
-- 会话具备播放、选择答案、正确/错误反馈和下一题。
-- 最后一题进入统计页。
-
-已验证首次引导、正式练习配置、4 题完成、结果跳转和稳定结果 URL。
+- 一级导航为首页、基础、听抄、发报、工具；进度和设置作为全局支持入口。
+- 统一训练使用 `/training/setup/:presetId`、`/training/session/:sessionId` 和 `/training/result/:sessionId`。
+- `/practice/*`、`/keyer`、`/stats/*` 均进入 V2 未找到页，不建立重定向。
+- `/learn/character/S`、`/receive`、`/send/free`、`/tools/morse` 服务端直链渲染检查通过。
 
 ### 4.2 学习页按键练习
 
@@ -116,7 +114,7 @@
 
 **状态：业务逻辑闭环已实现，真实浏览器交互待测。**
 
-- 统计页和练习中心存在重练入口。
+- 进度页和听抄功能域存在重练入口。
 - TrainingEngine 根据最新会话的首次错误 attempts 生成重练字符集合。
 - 重练会话使用新 seed，并保留原会话速度与反馈配置。
 

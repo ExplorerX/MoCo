@@ -6,8 +6,8 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | 0.2.0 |
-| 状态 | V2 信息架构待确认；完整迁移方案已定义 |
+| 文档版本 | 0.2.1 |
+| 状态 | V2 信息架构已确认；断代式重构实施中 |
 | 更新日期 | 2026-07-16 |
 | 适用平台 | Web/PWA、移动应用容器、桌面应用容器 |
 
@@ -18,7 +18,7 @@
 3. **内容与训练分离**：字母、词组、Q 简语等以内容包复用；页面表达用户任务，不复制引擎。
 4. **训练会话统一**：所有计分训练共用设置、专注会话、结果和恢复结构。
 5. **渐进披露**：功能域首页先展示可用预设；专业参数和未实现内容不抢占首屏。
-6. **状态可恢复**：旧会话、深链接、课程进度和历史必须有明确迁移路径。
+6. **V2 状态可恢复**：从 V2 新建的会话、深链接、课程进度和历史必须稳定恢复；旧状态不兼容。
 7. **跨端同义**：导航形态可以改变，功能名称、页面归属和稳定 ID 不改变。
 8. **避免空页面**：未实现的 P1/P2 能力不进入主导航，不创建可点击的“敬请期待”页。
 
@@ -122,7 +122,7 @@ flowchart TD
 | 音频未解锁 | 首个需要声音的页面 | 显示明确启用按钮 |
 | 数据无法保存 | 全局状态条 | 持续提示并提供导出/诊断入口 |
 | 应用更新可用 | 非会话状态条 | 用户确认更新，会话中不强制刷新 |
-| 旧数据迁移失败 | 全局恢复页 | 保留旧数据，停止写入并提供恢复说明 |
+| V2 数据初始化失败 | 全局恢复页 | 停止写入并提供重试、导出诊断和清空 V2 数据说明 |
 
 ## 5. V2 路由结构
 
@@ -171,7 +171,7 @@ flowchart TD
 
 - `presetId`、内容包 ID 和 mode ID 是稳定协议，不使用显示名称作为数据键。
 - 统一会话通过 `sessionId` 和保存的 definition 恢复，不依赖内存状态。
-- 旧 `/practice/session/:sessionId` 与 `/practice/result/:sessionId` 在迁移期继续解析，并重定向到对应新路由。
+- 旧 `/practice/*`、`/keyer`、`/stats/*` 不再解析，不设置重定向或别名。
 - 无效预设、内容包或会话显示可恢复错误页，并返回来源功能域。
 - 特殊字符详情使用安全编码；工具输入正文不进入 URL 查询参数。
 - 未实现的 P1/P2 页面不出现在主导航，也不创建阻塞主流程的占位页。
@@ -383,28 +383,28 @@ stateDiagram-v2
 
 ## 9. 旧功能与页面迁移表
 
-本节是代码重构时的迁移权威表。迁移顺序不得以删除旧路由开头；先建立新入口和映射，再移除旧导航。
+本节是代码重构时的旧入口处置权威表。V2 采用断代式切换：新入口一次生效，旧路由直接删除。
 
 ### 9.1 页面与路由迁移
 
-| 当前页面/路由 | 当前能力 | V2 页面/路由 | 决定 | 数据与兼容要求 |
+| 当前页面/路由 | 当前能力 | V2 页面/路由 | 决定 | V2 数据规则 |
 | --- | --- | --- | --- | --- |
 | `/home` | 首页、四模式入口、摘要 | `/home` | 原路由重构 | 保留继续会话、统计摘要和 PWA 状态 |
 | `/learn` | 字符表、字符详情双栏 | `/learn` | 改为基础域首页 | 字符表移入“字符学习”，保留筛选状态 |
 | `/learn/character/:symbol` | 字符详情、播放、跟敲 | 原路由 | 完整保留 | 深链接、字符统计和输入反馈不变 |
-| 练习中心内六阶段课程 | 双字符引导课程 | `/learn/courses` | 迁入新手课程 | 保留 lesson ID、解锁和完成记录 |
-| `/practice` | 四种模式和引导课程 | 分流到 `/learn`、`/receive`、`/send` | 旧聚合页退出主导航 | 迁移期重定向到来源明确的功能域选择页 |
-| `/practice/setup/sound` | 声音 → 字符设置 | `/training/setup/receive.character.audio` | 迁移 | 旧 mode 映射到新 presetId |
-| `/practice/setup/code` | Morse → 字符设置 | `/training/setup/learn.character.decode` | 迁移 | 保留最近设置 |
-| `/practice/setup/encode` | 字符 → Morse 设置 | `/training/setup/learn.character.encode` | 迁移 | 保留最近设置 |
-| `/practice/setup/send` | 字符 → 发报设置 | `/training/setup/send.character.guided` | 迁移 | 保留键位、阈值和最近设置 |
-| `/practice/session/:sessionId` | 统一旧会话 | `/training/session/:sessionId` | 建立别名/重定向 | definition 原地可读，进行中会话可恢复 |
-| `/practice/result/:sessionId` | 旧结果页 | `/training/result/:sessionId` | 建立别名/重定向 | 旧结果链接和错题重练可用 |
-| `/keyer` | 自由发报 | `/send/free` | 重命名为自由拍发 | 输出、声音、时长、设置和隐私策略不变 |
-| `/stats` | 统计概览 | `/progress` | 重命名 | 旧历史继续显示，旧 URL 重定向 |
-| `/stats/characters` | 字符表现 | `/progress/content` | 扩展 | 字符统计原样读取，后续增加内容类型 |
-| `/stats/history` | 训练历史 | `/progress/history` | 重命名 | 旧 mode 显示 V2 名称但不改原记录 |
-| `/settings/*` | 六组设置 | 原路由 | 保留并扩展 | 当前设置键继续读取，新增设置有默认值 |
+| 练习中心内六阶段课程 | 双字符引导课程 | `/learn/courses` | 重建为新手课程 | V2 解锁进度从零开始 |
+| `/practice` | 四种模式和引导课程 | 分流到 `/learn`、`/receive`、`/send` | 删除 | 返回 V2 未找到页 |
+| `/practice/setup/sound` | 声音 → 字符设置 | `/training/setup/receive.character.audio` | 删除旧路由 | 新 presetId 从空设置开始 |
+| `/practice/setup/code` | Morse → 字符设置 | `/training/setup/learn.character.decode` | 删除旧路由 | 新 presetId 从空设置开始 |
+| `/practice/setup/encode` | 字符 → Morse 设置 | `/training/setup/learn.character.encode` | 删除旧路由 | 新 presetId 从空设置开始 |
+| `/practice/setup/send` | 字符 → 发报设置 | `/training/setup/send.character.guided` | 删除旧路由 | 新 presetId 从空设置开始 |
+| `/practice/session/:sessionId` | 统一旧会话 | `/training/session/:sessionId` | 删除旧路由 | 不读取旧 definition 或会话 |
+| `/practice/result/:sessionId` | 旧结果页 | `/training/result/:sessionId` | 删除旧路由 | 不读取旧结果 |
+| `/keyer` | 自由发报 | `/send/free` | 删除旧路由并重命名能力 | V2 使用新设置键 |
+| `/stats` | 统计概览 | `/progress` | 删除旧路由并重命名能力 | V2 统计从零开始 |
+| `/stats/characters` | 字符表现 | `/progress/content` | 删除旧路由 | 只读取 V2 字符统计 |
+| `/stats/history` | 训练历史 | `/progress/history` | 删除旧路由 | 只读取 V2 训练历史 |
+| `/settings/*` | 六组设置 | 原路由 | 页面保留、数据重置 | 使用 V2 新设置命名空间 |
 | `/input` 概念 | 应用内输入法预留 | 暂不进入 V2 导航 | 延后 | 不创建空页面，不删除路线记录 |
 
 ### 9.2 功能入口迁移
@@ -441,16 +441,14 @@ stateDiagram-v2
 | 汉字转电码 | 工具 / 中文电码 | 汉字 → 四位代码 |
 | 电码转汉字 | 工具 / 中文电码 | 四位代码 → 汉字候选 |
 
-## 10. 迁移发布顺序
+## 10. 断代发布顺序
 
-1. 定义新 route、presetId 和旧 mode 映射，不改变现有页面入口。
-2. 建立首页、基础、听抄、发报和工具的新 App Shell 导航。
-3. 将现有四种练习卡接到对应功能域；旧会话和结果路由保持可用。
-4. 迁移自由发报到 `/send/free`，迁移统计到 `/progress`。
-5. 迁移双字符课程和字符表的页面归属。
-6. 更新深链接、PWA 导航回退、离线缓存、帮助和测试。
-7. 完成回归后移除旧导航入口；旧 URL 重定向至少保留一个稳定版本周期。
-8. 在新结构稳定后逐批开放随机字符组、词组、长文、专业内容和转换工具。
+1. 定义 V2 route、presetId、新数据库、data schema 和 localStorage 键。
+2. 一次性切换首页、基础、听抄、发报和工具的新 App Shell 导航。
+3. 将四种成熟训练能力接到对应功能域，并删除所有旧路由解析。
+4. 将自由发报重挂到 `/send/free`，统计重挂到 `/progress`，课程重挂到 `/learn`。
+5. 更新深链接、PWA 缓存、帮助和测试，验证旧 URL 均进入未找到页。
+6. 在新结构稳定后逐批开放词组、长文、专业内容和中文电码工具。
 
 ## 11. 信息架构验收标准
 
@@ -462,16 +460,16 @@ stateDiagram-v2
 - [ ] 进度与设置全局可发现，但不占移动端四大功能域位置。
 - [ ] 移动端底部导航不超过五项。
 - [ ] 所有统一训练会话隐藏全局导航。
-- [ ] 旧会话、结果、课程、统计和设置可恢复。
-- [ ] 旧 URL 有明确重定向或兼容解析。
+- [x] 旧会话、结果、课程、统计和设置不被 V2 读取。
+- [x] 旧 URL 直接进入未找到页，不重定向、不兼容解析。
 - [ ] 未实现功能不会形成可点击空页面。
 - [ ] 桌面与移动端使用相同页面名称和功能归属。
 
-## 12. 确认后的设计与开发产出
+## 12. 已确认的设计与开发产出
 
 1. 更新路由模型、导航配置和旧 mode → presetId 映射设计。
 2. 为首页、四大功能域首页、统一设置、统一会话、结果和自由拍发制作低保真线框。
 3. 定义 Preset Card、Content Selector、Domain Header 和 Tool Workspace 组件规格。
-4. 更新训练 definition 和统计展示的兼容策略；必要的数据 schema 变更先写迁移测试。
-5. 按第 10 节顺序重构页面，不并行删除旧路由。
-6. 执行桌面、375px 移动端、键盘、Pointer、离线更新和旧数据恢复回归。
+4. 更新训练 definition、数据库名称和 data schema；不实现旧数据迁移器。
+5. 按第 10 节顺序重构页面并同步删除旧路由。
+6. 执行桌面、375px 移动端、键盘、Pointer、离线更新、V2 新数据恢复和旧 URL 删除回归。

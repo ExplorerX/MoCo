@@ -6,7 +6,7 @@ import {
   type SessionSnapshot,
 } from "@learning-morse/shared-types";
 
-export const DATABASE_NAME = "learning-morse-code";
+export const DATABASE_NAME = "learning-morse-code-v2";
 export const DATABASE_VERSION = 1;
 
 export type AppMetaRecord = {

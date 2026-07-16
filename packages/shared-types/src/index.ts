@@ -1,4 +1,4 @@
-export const DATA_SCHEMA_VERSION = 1 as const;
+export const DATA_SCHEMA_VERSION = 2 as const;
 
 export type PracticeMode =
   | "character-to-code"

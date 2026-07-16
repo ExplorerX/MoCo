@@ -10,7 +10,7 @@
 | 状态 | MVP 架构基线 |
 | 更新日期 | 2026-07-15 |
 | 适用范围 | Web/PWA 核心及 Android、iOS、桌面封装边界 |
-| 当前实现 | Stage C.1 Web/PWA；四种训练闭环、稳定路由、领域引擎、IndexedDB 与离线应用壳已接通 |
+| 当前实现 | V2 Foundation Web/PWA；四大功能域、统一训练路由、领域引擎、V2 IndexedDB 与离线应用壳已接通 |
 | 目标实现 | React + TypeScript + Vite 的本地优先客户端应用 |
 
 ## 2. 架构驱动因素

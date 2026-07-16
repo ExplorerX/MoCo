@@ -5,7 +5,6 @@ async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
-
   return worker.fetch(
     new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
@@ -13,33 +12,32 @@ async function render(path = "/") {
   );
 }
 
-test("server-renders onboarding and stable application routes", async () => {
+test("server-renders V2 navigation, domains and removed legacy routes", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
   const html = await response.text();
   assert.match(html, /<title>Morse Learning Lab<\/title>/i);
   assert.match(html, /点短，划长/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 
-  const direct = await render("/practice/setup/sound");
-  assert.equal(direct.status, 200);
-  assert.match(await direct.text(), /自定义本轮练习/);
+  const setup = await render("/training/setup/receive.character.audio");
+  assert.match(await setup.text(), /自定义本轮训练/);
 
   const learn = await render("/learn/character/S");
-  assert.equal(learn.status, 200);
   const learnHtml = await learn.text();
+  assert.match(learnHtml, /新手基础练习/);
   assert.match(learnHtml, /按键练习/);
   assert.match(learnHtml, /按压时长/);
   assert.match(learnHtml, /自动判定并清空/);
-  assert.doesNotMatch(learnHtml, />退格</);
 
-  const practice = await render("/practice");
-  assert.equal(practice.status, 200);
-  assert.match(await practice.text(), /每次认识两个节奏/);
+  assert.match(await (await render("/receive")).text(), /让耳朵直接抵达字符/);
+  assert.match(await (await render("/send/free")).text(), /自动提交等待/);
+  const tools = await (await render("/tools/morse")).text();
+  assert.match(tools, /文本与国际 Morse Code 双向转换/);
+  assert.match(tools, /SOS MORSE/);
 
-  const keyer = await render("/keyer");
-  assert.equal(keyer.status, 200);
-  assert.match(await keyer.text(), /自动提交等待/);
+  for (const oldPath of ["/practice", "/keyer", "/stats"]) {
+    assert.match(await (await render(oldPath)).text(), /这个频率上没有页面/);
+  }
 });
