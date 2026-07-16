@@ -1,5 +1,5 @@
 // Bump this value for every released application shell so the waiting-worker update flow is triggered.
-const CACHE_VERSION = "morse-lab-v0.4.2";
+const CACHE_VERSION = "morse-lab-v0.4.3";
 const APP_SHELL = [
   "/",
   "/home",

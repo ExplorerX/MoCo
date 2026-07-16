@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function render(path = "/") {
@@ -41,4 +42,13 @@ test("server-renders V2 navigation, domains and removed legacy routes", async ()
   for (const oldPath of ["/practice", "/keyer", "/stats"]) {
     assert.match(await (await render(oldPath)).text(), /这个频率上没有页面/);
   }
+});
+
+test("mobile CSS keeps long labels and dynamic Morse content inside panels", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /overflow-wrap:\s*anywhere/);
+  assert.match(css, /@media \(max-width: 360px\)/);
+  assert.match(css, /\.duration-readout\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+  assert.match(css, /\.practice-card dl\s*\{\s*grid-template-columns:\s*1fr/);
+  assert.match(css, /\.typed-answer\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
