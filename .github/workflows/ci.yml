@@ -43,23 +43,23 @@ jobs:
         run: npm run build
 
       - name: Run Morse core tests
-        run: node --test tests/morse-core.test.ts
+        run: node --experimental-strip-types --test tests/morse-core.test.ts
 
       - name: Run training engine tests
-        run: node --test tests/training-engine.test.ts
+        run: node --experimental-strip-types --test tests/training-engine.test.ts
 
       - name: Run audio engine tests
-        run: node --test tests/audio-engine.test.ts
+        run: node --experimental-strip-types --test tests/audio-engine.test.ts
 
       - name: Run input engine tests
-        run: node --test tests/input-engine.test.ts
+        run: node --experimental-strip-types --test tests/input-engine.test.ts
 
       - name: Run storage integration tests
-        run: node --test tests/integration/storage.test.ts
+        run: node --experimental-strip-types --test tests/integration/storage.test.ts
 
       - name: Run web and PWA tests
         run: >-
-          node --test
+          node --experimental-strip-types --test
           tests/routes.test.ts
           tests/pwa.test.mjs
           tests/rendered-html.test.mjs

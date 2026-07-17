@@ -14,7 +14,7 @@
     "start": "vinext start",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && npm run test:unit",
-    "test:unit": "node --test tests/morse-core.test.ts tests/training-engine.test.ts tests/audio-engine.test.ts tests/input-engine.test.ts tests/integration/storage.test.ts tests/routes.test.ts tests/pwa.test.mjs tests/rendered-html.test.mjs",
+    "test:unit": "node --experimental-strip-types --test tests/morse-core.test.ts tests/training-engine.test.ts tests/audio-engine.test.ts tests/input-engine.test.ts tests/integration/storage.test.ts tests/routes.test.ts tests/pwa.test.mjs tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
