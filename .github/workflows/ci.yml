@@ -42,13 +42,17 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
-      - name: Run domain engine tests
-        run: >-
-          node --test
-          tests/morse-core.test.ts
-          tests/training-engine.test.ts
-          tests/audio-engine.test.ts
-          tests/input-engine.test.ts
+      - name: Run Morse core tests
+        run: node --test tests/morse-core.test.ts
+
+      - name: Run training engine tests
+        run: node --test tests/training-engine.test.ts
+
+      - name: Run audio engine tests
+        run: node --test tests/audio-engine.test.ts
+
+      - name: Run input engine tests
+        run: node --test tests/input-engine.test.ts
 
       - name: Run storage integration tests
         run: node --test tests/integration/storage.test.ts
