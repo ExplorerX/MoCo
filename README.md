@@ -1,5 +1,7 @@
 # Learning Morse Code
 
+[![CI](https://github.com/ExplorerX/MoCo/actions/workflows/ci.yml/badge.svg)](https://github.com/ExplorerX/MoCo/actions/workflows/ci.yml)
+
 一个声音优先、离线优先的 Morse Code 学习与练习应用。项目目标是在 Web/PWA、Android、iOS 和桌面端复用同一套领域核心。
 
 当前为 V2 Foundation 0.4.3：导航和页面已重构为“基础、听抄、发报、工具”四个功能域，统一训练路由、V2 本地数据、自由拍发、Morse 双向转换、字符速查、进度与设置均已接通。本轮完成移动端文字与布局稳定化，覆盖极窄屏、主流手机和横屏：长中文标签、按键名与 Morse 字符串可在框内安全换行，训练顶栏、参数行、PWA 状态、卡片按钮及按压时长组件不再挤出容器。V2 不读取旧会话、结果、课程进度或设置，旧 URL 不提供重定向。进入 Capacitor/Tauri 封装前仍需完成跨浏览器与真机矩阵。
@@ -31,6 +33,8 @@ npm test
 ```
 
 `npm test` 会执行生产构建、32 项领域/存储/V2 路由/PWA/移动布局测试和服务端直达渲染检查。
+
+GitHub Actions 会在提交到 `main`、发往 `main` 的 Pull Request 和手动触发时执行同一套质量门禁：锁定依赖安装、类型检查、Lint、生产构建和自动化测试。工作流只读取仓库内容，不持有部署或写入权限。
 
 ## 工作区结构
 
@@ -64,10 +68,12 @@ git push -u origin feature/training-engine
 
 - `main` 只接收通过构建、类型、静态检查和相关测试的提交。
 - 功能分支建议使用 `feature/`、修复使用 `fix/`、文档使用 `docs/` 前缀。
-- Pull Request 合并并确认 `main` 正常后，删除对应本地和远程分支。
+- 分支保持短生命周期；Pull Request 合并并确认 `main` 正常后，删除对应本地和远程分支。
 - 不为 Stage 长期保留分支；阶段里程碑使用版本标签或 GitHub Release 表达。
 - 提交保持单一目的，不将无关格式化或临时产物混入功能提交。
 - 合并前通过 Pull Request 检查功能范围、测试结果和文档同步情况。
+
+建议在 GitHub 的 `main` 分支保护中要求 `Validate web and domain packages` 通过后才能合并。当前线上版本继续由 Sites 托管流程发布；本项目不是纯静态站点，暂不使用 GitHub Pages，也不把部署密钥放进 CI。
 
 ## 项目文档
 
