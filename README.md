@@ -30,7 +30,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` 会执行生产构建、31 项领域/存储/V2 路由/PWA 测试和服务端直达渲染检查。
+`npm test` 会执行生产构建、32 项领域/存储/V2 路由/PWA/移动布局测试和服务端直达渲染检查。
 
 ## 工作区结构
 
@@ -53,7 +53,7 @@ ValidationReport.md          自动验证与真机测试状态
 
 ## Git 工作流
 
-远程仓库为 `origin`，默认分支为 `main`。功能开发使用短生命周期分支：
+远程仓库为 `origin`，默认分支为 `main`，也是唯一长期分支。功能开发使用短生命周期分支：
 
 ```bash
 git switch -c feature/training-engine
@@ -64,6 +64,8 @@ git push -u origin feature/training-engine
 
 - `main` 只接收通过构建、类型、静态检查和相关测试的提交。
 - 功能分支建议使用 `feature/`、修复使用 `fix/`、文档使用 `docs/` 前缀。
+- Pull Request 合并并确认 `main` 正常后，删除对应本地和远程分支。
+- 不为 Stage 长期保留分支；阶段里程碑使用版本标签或 GitHub Release 表达。
 - 提交保持单一目的，不将无关格式化或临时产物混入功能提交。
 - 合并前通过 Pull Request 检查功能范围、测试结果和文档同步情况。
 
