@@ -42,5 +42,20 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
-      - name: Run automated tests
-        run: npm run test:unit
+      - name: Run domain engine tests
+        run: >-
+          node --test
+          tests/morse-core.test.ts
+          tests/training-engine.test.ts
+          tests/audio-engine.test.ts
+          tests/input-engine.test.ts
+
+      - name: Run storage integration tests
+        run: node --test tests/integration/storage.test.ts
+
+      - name: Run web and PWA tests
+        run: >-
+          node --test
+          tests/routes.test.ts
+          tests/pwa.test.mjs
+          tests/rendered-html.test.mjs
